@@ -524,6 +524,106 @@ func (s *AuditService) Success(ctx, beforeData, affectedRows)
 func (s *AuditService) Fail(ctx, err)
 ```
 
+### 5.5 扩展性设计：数据恢复功能（预留）
+
+审计日志的设计已考虑数据恢复功能，为后续扩展预留接口。
+
+#### 审计日志数据结构（支持恢复）
+
+```go
+type AuditLog struct {
+    ID          uint      `gorm:"primaryKey"`
+    Timestamp   time.Time `gorm:"index"`
+    Operation   string    `gorm:"size:20;index"`   // SELECT, INSERT, UPDATE, DELETE
+    Table       string    `gorm:"size:100;index"`
+    RecordID    string    `gorm:"size:100;index"`
+    Actor       string    `gorm:"size:100"`
+    RequestID   string    `gorm:"size:50;index"`
+    BeforeData  string    `gorm:"type:text;comment:操作前完整数据快照(JSON)"`  // 用于恢复
+    AfterData   string    `gorm:"type:text;comment:操作后完整数据快照(JSON)"`
+    Duration    int64
+    Status      string    `gorm:"size:20;index"`   // success, failed, rolled_back
+    ErrorMsg    string    `gorm:"type:text"`
+    Recoverable bool      `gorm:"default:true;comment:是否可恢复"`  // 预留字段
+    RecoveredAt *time.Time `gorm:"comment:恢复时间"`              // 预留字段
+}
+```
+
+#### 预留恢复接口
+
+```go
+// RecoveryService 数据恢复服务（预留，后续版本实现）
+type RecoveryService struct {
+    auditRepo *repository.Repository
+    dbRepo    *repository.Repository
+    logger    *logger.Logger
+}
+
+// GetRecoverableOperations 获取可恢复的操作列表
+func (s *RecoveryService) GetRecoverableOperations(ctx context.Context, req *RecoveryQueryRequest) (*RecoveryQueryResult, error)
+
+// PreviewRecovery 预览恢复操作将产生的影响
+func (s *RecoveryService) PreviewRecovery(ctx context.Context, auditLogID uint) (*RecoveryPreview, error)
+
+// ExecuteRecovery 执行数据恢复
+func (s *RecoveryService) ExecuteRecovery(ctx context.Context, req *RecoveryRequest) (*RecoveryResult, error)
+
+// RecoveryRequest 恢复请求
+type RecoveryRequest struct {
+    AuditLogID  uint             // 审计日志 ID
+    DryRun      bool             // 是否仅预览
+    ConfirmCode string           // 确认码（防止误操作）
+}
+
+// RecoveryResult 恢复结果
+type RecoveryResult struct {
+    Success      bool
+    AffectedRows int64
+    Message      string
+    NewAuditID   uint   // 恢复操作产生的新的审计日志 ID
+}
+```
+
+#### 恢复策略
+
+| 操作类型 | 恢复策略 | 说明 |
+|----------|----------|------|
+| INSERT | DELETE | 删除插入的记录 |
+| UPDATE | UPDATE | 使用 BeforeData 恢复原值 |
+| DELETE | UPDATE | 清除删除标记，恢复记录 |
+| TRANSACTION | 逆序回滚 | 按相反顺序执行逆操作 |
+
+#### MCP 工具（预留）
+
+```json
+{
+  "name": "db_recovery_preview",
+  "description": "预览数据恢复操作的影响（预留功能）",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "audit_log_id": { "type": "integer" }
+    },
+    "required": ["audit_log_id"]
+  }
+}
+```
+
+```json
+{
+  "name": "db_recovery_execute",
+  "description": "执行数据恢复（预留功能）",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "audit_log_id": { "type": "integer" },
+      "confirm_code": { "type": "string" }
+    },
+    "required": ["audit_log_id", "confirm_code"]
+  }
+}
+```
+
 ---
 
 ## 6. 非功能性设计
