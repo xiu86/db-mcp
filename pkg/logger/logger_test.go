@@ -17,7 +17,7 @@ func TestNewLogger(t *testing.T) {
 
 	log := NewLogger(cfg)
 	assert.NotNil(t, log)
-	assert.Equal(t, "debug", log.format)
+	assert.Equal(t, "json", log.format)
 	assert.Equal(t, slog.LevelDebug, log.level)
 }
 

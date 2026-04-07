@@ -222,13 +222,6 @@ func TestAuditLog_WithError(t *testing.T) {
 	assert.Equal(t, "timeout", log.ErrorMsg)
 }
 
-// Test for CRUD Service (requires mock, but we can test basic construction)
-func TestNewCRUDService(t *testing.T) {
-	// This would require mock dependencies
-	// For now, we test the structure exists
-	assert.NotNil(t, NewAuditService)
-}
-
 // Test for Transaction Service (requires mock, but we can test basic construction)
 func TestNewTransactionService(t *testing.T) {
 	// This would require mock dependencies

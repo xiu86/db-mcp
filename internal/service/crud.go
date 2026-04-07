@@ -9,14 +9,14 @@ import (
 )
 
 type CRUDService struct {
-    repo     *repository.Repository
+    repo     repository.RepositoryInterface
     audit    *AuditService
     detector *detector.DeleteFieldDetector
     config   *config.Config
     logger   *logger.Logger
 }
 
-func NewCRUDService(repo *repository.Repository, audit *AuditService, cfg *config.Config, log *logger.Logger) *CRUDService {
+func NewCRUDService(repo repository.RepositoryInterface, audit *AuditService, cfg *config.Config, log *logger.Logger) *CRUDService {
     return &CRUDService{
         repo:     repo,
         audit:    audit,

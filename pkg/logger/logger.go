@@ -71,10 +71,12 @@ func parseLevel(level string) slog.Level {
 	switch strings.ToLower(level) {
 	case "debug":
 		return slog.LevelDebug
-	case "warn":
+	case "warn", "warning":
 		return slog.LevelWarn
 	case "error":
 		return slog.LevelError
+	case "info":
+		return slog.LevelInfo
 	default:
 		return slog.LevelInfo
 	}

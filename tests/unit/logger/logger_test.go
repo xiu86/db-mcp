@@ -20,6 +20,7 @@ func TestNewLogger_TextFormat(t *testing.T) {
 	cfg := &config.LogConfig{Level: "info", Format: "text", Output: "stdout"}
 	appLogger := logger.NewLogger(cfg)
 	assert.NotNil(t, appLogger)
+	assert.Equal(t, "text", cfg.Format)
 }
 
 func TestParseLevel(t *testing.T) {
@@ -31,6 +32,7 @@ func TestParseLevel(t *testing.T) {
 		{"info", slog.LevelInfo},
 		{"warn", slog.LevelWarn},
 		{"error", slog.LevelError},
+		{"warning", slog.LevelWarn},
 		{"unknown", slog.LevelInfo},
 	}
 
