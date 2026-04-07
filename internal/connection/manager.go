@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"db-mcp/internal/config"
+	"db-mcp/pkg/logger"
 
-	gormLogger "gorm.io/gorm/logger"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -15,14 +15,13 @@ import (
 type ConnectionManager struct {
 	db     *gorm.DB
 	config *config.Config
+	logger *logger.Logger
 }
 
-func NewConnectionManager(cfg *config.Config) (*ConnectionManager, error) {
+func NewConnectionManager(cfg *config.Config, log *logger.Logger) (*ConnectionManager, error) {
 	dsn := BuildDSN(&cfg.Database)
 
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
-		Logger: gormLogger.Default.LogMode(gormLogger.Info),
-	})
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect database: %w", err)
 	}
@@ -37,7 +36,7 @@ func NewConnectionManager(cfg *config.Config) (*ConnectionManager, error) {
 	sqlDB.SetConnMaxLifetime(cfg.Pool.ConnMaxLifetime)
 	sqlDB.SetConnMaxIdleTime(cfg.Pool.ConnMaxIdleTime)
 
-	return &ConnectionManager{db: db, config: cfg}, nil
+	return &ConnectionManager{db: db, config: cfg, logger: log}, nil
 }
 
 func (m *ConnectionManager) DB() *gorm.DB {
