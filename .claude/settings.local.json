@@ -12,7 +12,9 @@
       "Bash(git init:*)",
       "Bash(go build:*)",
       "Bash(go doc:*)",
-      "Bash(gosec ./...)"
+      "Bash(gosec ./...)",
+      "Bash(go install:*)",
+      "Bash(mockgen:*)"
     ]
   }
 }
