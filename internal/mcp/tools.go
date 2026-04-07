@@ -126,13 +126,16 @@ func (s *MCPServer) registerTools() {
 }
 
 func getArgs(request mcp.CallToolRequest) map[string]interface{} {
-	if request.Params.Arguments == nil {
+	args := request.GetArguments()
+	if args == nil {
 		return make(map[string]interface{})
 	}
-	if m, ok := request.Params.Arguments.(map[string]interface{}); ok {
-		return m
+	// Convert map[string]any to map[string]interface{}
+	result := make(map[string]interface{})
+	for k, v := range args {
+		result[k] = v
 	}
-	return make(map[string]interface{})
+	return result
 }
 
 func (s *MCPServer) handleQuery(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
