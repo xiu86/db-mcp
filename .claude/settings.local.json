@@ -3,7 +3,16 @@
     "allow": [
       "Bash(git add:*)",
       "Bash(git commit -m \"docs: add implementation plan:*)",
-      "Bash(git commit -m \"docs: fix implementation plan based on review feedback:*)"
+      "Bash(git commit -m \"docs: fix implementation plan based on review feedback:*)",
+      "Bash(go mod:*)",
+      "Bash(go test:*)",
+      "Bash(go get:*)",
+      "Bash(find /System/Volumes/Data/data/data/myproj/db-mcp -name *.go -type f)",
+      "Bash(git commit:*)",
+      "Bash(git init:*)",
+      "Bash(go build:*)",
+      "Bash(go doc:*)",
+      "Bash(gosec ./...)"
     ]
   }
 }

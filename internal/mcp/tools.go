@@ -123,6 +123,12 @@ func (s *MCPServer) registerTools() {
 		mcp.WithDescription("Execute operations in a transaction"),
 		mcp.WithArray("operations", mcp.Required(), mcp.Description("Array of operations to execute")),
 	), s.handleTransaction)
+
+	// db_schema tool
+	s.server.AddTool(mcp.NewTool("db_schema",
+		mcp.WithDescription("Get table schema and detected delete fields"),
+		mcp.WithString("table", mcp.Required(), mcp.Description("Table name to get schema")),
+	), s.handleSchema)
 }
 
 func getArgs(request mcp.CallToolRequest) map[string]interface{} {
@@ -291,7 +297,7 @@ func (s *MCPServer) handleTransaction(ctx context.Context, request mcp.CallToolR
 		}
 
 		if opErr != nil {
-			txCtx.Rollback()
+			_ = txCtx.Rollback() // Best effort rollback
 			return mcp.NewToolResultError(fmt.Sprintf("Transaction failed at operation %s: %v", op.Type, opErr)), nil
 		}
 		results = append(results, res)
@@ -305,6 +311,18 @@ func (s *MCPServer) handleTransaction(ctx context.Context, request mcp.CallToolR
 		"status":  "committed",
 		"results": results,
 	})), nil
+}
+
+func (s *MCPServer) handleSchema(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(request)
+	table, _ := args["table"].(string)
+
+	result, err := s.crud.GetSchema(ctx, table)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return mcp.NewToolResultText(toJSON(result)), nil
 }
 
 // Helper types and functions

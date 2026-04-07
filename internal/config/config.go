@@ -83,6 +83,7 @@ func Load(configPath string) (*Config, error) {
     cfg := DefaultConfig()
 
     if configPath != "" {
+        // #nosec G304 - configPath is user-provided but intentionally used for config file loading
         data, err := os.ReadFile(configPath)
         if err != nil {
             return nil, fmt.Errorf("failed to read config file: %w", err)

@@ -105,6 +105,23 @@ type BatchError struct {
     Message string
 }
 
+// TableSchema 用于描述表结构
+type TableSchema struct {
+    TableName string
+    Columns   []ColumnInfo
+}
+
+// ColumnInfo 用于描述列信息
+type ColumnInfo struct {
+    Name         string
+    DataType     string
+    IsNullable   string
+    ColumnKey    string
+    Extra        string
+    ColumnDefault *string
+    Comment      string
+}
+
 func New(db *gorm.DB) *Repository {
     return &Repository{db: db}
 }
@@ -345,4 +362,44 @@ func joinFields(fields []string) string {
         result += f
     }
     return result
+}
+
+// GetTableSchema 获取表结构信息
+func (r *Repository) GetTableSchema(tableName string) (*TableSchema, error) {
+	var results []struct {
+		Field          string `gorm:"column:COLUMN_NAME"`
+		Type           string `gorm:"column:DATA_TYPE"`
+		Null           string `gorm:"column:IS_NULLABLE"`
+		Key            string `gorm:"column:COLUMN_KEY"`
+		Default        *string `gorm:"column:COLUMN_DEFAULT"`
+		Extra          string `gorm:"column:EXTRA"`
+		Comment        string `gorm:"column:COLUMN_COMMENT"`
+	}
+
+	err := r.db.Table("information_schema.COLUMNS").
+		Select("COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_KEY, EXTRA, COLUMN_DEFAULT, COLUMN_COMMENT").
+		Where("TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?", tableName).
+		Scan(&results).Error
+
+	if err != nil {
+		return nil, errors.WrapGormError(err)
+	}
+
+	var columns []ColumnInfo
+	for _, col := range results {
+		columns = append(columns, ColumnInfo{
+			Name:          col.Field,
+			DataType:      col.Type,
+			IsNullable:    col.Null,
+			ColumnKey:     col.Key,
+			Extra:         col.Extra,
+			ColumnDefault: col.Default,
+			Comment:       col.Comment,
+		})
+	}
+
+	return &TableSchema{
+		TableName: tableName,
+		Columns:   columns,
+	}, nil
 }

@@ -168,8 +168,40 @@ func (s *CRUDService) Join(ctx context.Context, req *repository.JoinRequest) (*r
     return result, nil
 }
 
+// GetSchema 获取表结构及检测到的删除字段
+func (s *CRUDService) GetSchema(ctx context.Context, table string) (map[string]interface{}, error) {
+    schema, err := s.repo.GetTableSchema(table)
+    if err != nil {
+        return nil, err
+    }
+
+    // 检测删除字段
+    columns := s.toDetectorColumns(schema.Columns)
+    deleteField := s.detector.Detect(table, columns)
+
+    return map[string]interface{}{
+        "table_name":    schema.TableName,
+        "columns":       schema.Columns,
+        "delete_fields": deleteField,
+    }, nil
+}
+
 func (s *CRUDService) getTableColumns(table string) []detector.ColumnInfo {
-    // This will be implemented by querying information_schema
-    // For now, return empty slice - detector will handle it
-    return []detector.ColumnInfo{}
+    schema, err := s.repo.GetTableSchema(table)
+    if err != nil {
+        return []detector.ColumnInfo{}
+    }
+    return s.toDetectorColumns(schema.Columns)
+}
+
+func (s *CRUDService) toDetectorColumns(columns []repository.ColumnInfo) []detector.ColumnInfo {
+    var result []detector.ColumnInfo
+    for _, col := range columns {
+        result = append(result, detector.ColumnInfo{
+            Name:     col.Name,
+            DataType: col.DataType,
+            Comment:  col.Comment,
+        })
+    }
+    return result
 }
