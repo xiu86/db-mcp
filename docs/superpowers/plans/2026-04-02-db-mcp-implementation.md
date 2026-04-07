@@ -154,7 +154,7 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 - [ ] **Step 1: 编写配置测试**
 
 ```go
-package config
+package config_test
 
 import (
     "os"
@@ -162,6 +162,7 @@ import (
     "time"
 
     "github.com/stretchr/testify/assert"
+    "db-mcp/internal/config"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -444,7 +445,7 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 - [ ] **Step 1: 编写测试**
 
 ```go
-package logger
+package logger_test
 
 import (
     "bytes"
@@ -637,7 +638,7 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 - [ ] **Step 1: 编写测试**
 
 ```go
-package errors
+package errors_test
 
 import (
     "errors"
@@ -788,7 +789,7 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 - [ ] **Step 1: 编写测试**
 
 ```go
-package connection
+package connection_test
 
 import (
     "testing"
@@ -944,7 +945,7 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 - [ ] **Step 1: 编写测试**
 
 ```go
-package detector
+package detector_test
 
 import (
     "testing"
@@ -1234,7 +1235,7 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 - [ ] **Step 1: 编写测试**
 
 ```go
-package repository
+package repository_test
 
 import (
     "testing"
@@ -1500,6 +1501,147 @@ func (r *Repository) LogicalDelete(req *DeleteRequest) (*MutationResult, error) 
     }, nil
 }
 
+func (r *Repository) BatchInsert(req *BatchInsertRequest) (*BatchResult, error) {
+    var successCount, failedCount int64
+    var batchErrors []BatchError
+
+    for i, data := range req.Data {
+        err := r.db.Table(req.Table).Create(data).Error
+        if err != nil {
+            failedCount++
+            batchErrors = append(batchErrors, BatchError{Index: i, Message: err.Error()})
+        } else {
+            successCount++
+        }
+    }
+
+    return &BatchResult{
+        SuccessCount: successCount,
+        FailedCount:  failedCount,
+        Errors:       batchErrors,
+    }, nil
+}
+
+func (r *Repository) BatchUpdate(req *BatchUpdateRequest) (*BatchResult, error) {
+    var successCount, failedCount int64
+    var batchErrors []BatchError
+
+    keyField := req.KeyField
+    if keyField == "" {
+        keyField = "id"
+    }
+
+    for i, data := range req.Data {
+        keyValue := data[keyField]
+        if keyValue == nil {
+            failedCount++
+            batchErrors = append(batchErrors, BatchError{Index: i, Message: "key field value is nil"})
+            continue
+        }
+
+        delete(data, keyField)
+        result := r.db.Table(req.Table).Where(keyField+" = ?", keyValue).Updates(data)
+        if result.Error != nil {
+            failedCount++
+            batchErrors = append(batchErrors, BatchError{Index: i, Message: result.Error.Error()})
+        } else {
+            successCount++
+        }
+    }
+
+    return &BatchResult{
+        SuccessCount: successCount,
+        FailedCount:  failedCount,
+        Errors:       batchErrors,
+    }, nil
+}
+
+func (r *Repository) BatchLogicalDelete(req *BatchDeleteRequest) (*BatchResult, error) {
+    if req.DeleteField == nil || len(req.DeleteField.Fields) == 0 {
+        return nil, errors.NewError(errors.ErrInvalidInput, "no delete field detected", nil)
+    }
+
+    var successCount, failedCount int64
+    var batchErrors []BatchError
+
+    idField := req.IDField
+    if idField == "" {
+        idField = "id"
+    }
+
+    updates := make(map[string]interface{})
+    for _, field := range req.DeleteField.Fields {
+        updates[field.Name] = field.TrueValue
+    }
+
+    for i, id := range req.IDs {
+        result := r.db.Table(req.Table).Where(idField+" = ?", id).Updates(updates)
+        if result.Error != nil {
+            failedCount++
+            batchErrors = append(batchErrors, BatchError{Index: i, Message: result.Error.Error()})
+        } else {
+            successCount++
+        }
+    }
+
+    return &BatchResult{
+        SuccessCount: successCount,
+        FailedCount:  failedCount,
+        Errors:       batchErrors,
+    }, nil
+}
+
+func (r *Repository) JoinQuery(req *JoinRequest) (*QueryResult, error) {
+    if len(req.Tables) < 2 {
+        return nil, errors.NewError(errors.ErrInvalidInput, "at least 2 tables required for join", nil)
+    }
+
+    table0 := req.Tables[0]
+    query := r.db.Table(table0.Name + " AS " + table0.Alias)
+
+    for _, join := range req.Joins {
+        joinType := "INNER JOIN"
+        switch join.Type {
+        case "left":
+            joinType = "LEFT JOIN"
+        case "right":
+            joinType = "RIGHT JOIN"
+        }
+        query = query.Joins(joinType + " " + join.ToTable + " ON " +
+            join.FromTable+"."+join.FromField+" = "+
+            join.ToTable+"."+join.ToField)
+    }
+
+    if len(req.Where) > 0 {
+        query = query.Where(req.Where)
+    }
+
+    for _, order := range req.Order {
+        dir := "ASC"
+        if order.Direction == "desc" {
+            dir = "DESC"
+        }
+        query = query.Order(order.Field + " " + dir)
+    }
+
+    if req.Limit > 0 {
+        query = query.Limit(req.Limit)
+    }
+
+    fields := "*"
+    if len(req.Fields) > 0 {
+        fields = joinFields(req.Fields)
+    }
+
+    var rows []map[string]interface{}
+    err := query.Select(fields).Find(&rows).Error
+    if err != nil {
+        return nil, errors.WrapGormError(err)
+    }
+
+    return &QueryResult{Rows: rows, Total: int64(len(rows))}, nil
+}
+
 func joinFields(fields []string) string {
     result := ""
     for i, f := range fields {
@@ -1541,17 +1683,18 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 - [ ] **Step 1: 编写测试**
 
 ```go
-package service
+package service_test
 
 import (
     "testing"
     "time"
 
     "github.com/stretchr/testify/assert"
+    "db-mcp/internal/service"
 )
 
 func TestAuditContext(t *testing.T) {
-    ctx := &AuditContext{
+    ctx := &service.AuditContext{
         RequestID:  "req-123",
         Operation:  "SELECT",
         Table:      "users",
@@ -1565,9 +1708,9 @@ func TestAuditContext(t *testing.T) {
 }
 
 func TestNewAuditService(t *testing.T) {
-    service := NewAuditService(nil, "_audit_logs")
-    assert.NotNil(t, service)
-    assert.Equal(t, "_audit_logs", service.table)
+    svc := service.NewAuditService(nil, "_audit_logs")
+    assert.NotNil(t, svc)
+    assert.Equal(t, "_audit_logs", svc.Table)
 }
 ```
 
@@ -1584,6 +1727,8 @@ go test ./tests/unit/audit_test.go -v
 package service
 
 import (
+    "encoding/json"
+    "fmt"
     "time"
 )
 
@@ -1615,14 +1760,14 @@ type AuditContext struct {
 
 type AuditService struct {
     repo   interface{}
-    table  string
+    Table  string
     logger interface{}
 }
 
 func NewAuditService(repo interface{}, table string) *AuditService {
     return &AuditService{
         repo:  repo,
-        table: table,
+        Table: table,
     }
 }
 
@@ -1659,16 +1804,16 @@ func (s *AuditService) Fail(ctx *AuditContext, errMsg string) {
     duration := time.Since(ctx.StartTime).Milliseconds()
 
     log := AuditLog{
-        Timestamp: ctx.StartTime,
-        Operation: ctx.Operation,
-        Table:     ctx.Table,
-        RecordID:  ctx.RecordID,
-        Actor:     ctx.Actor,
-        RequestID: ctx.RequestID,
-        BeforeData: toJSON(ctx.BeforeData),
-        Duration:  duration,
-        Status:    "failed",
-        ErrorMsg:  errMsg,
+        Timestamp:   ctx.StartTime,
+        Operation:   ctx.Operation,
+        Table:       ctx.Table,
+        RecordID:    ctx.RecordID,
+        Actor:       ctx.Actor,
+        RequestID:   ctx.RequestID,
+        BeforeData:  toJSON(ctx.BeforeData),
+        Duration:    duration,
+        Status:      "failed",
+        ErrorMsg:    errMsg,
     }
     _ = log
 }
@@ -1690,7 +1835,11 @@ func toJSON(data interface{}) string {
     if data == nil {
         return ""
     }
-    return "{}"
+    bytes, err := json.Marshal(data)
+    if err != nil {
+        return ""
+    }
+    return string(bytes)
 }
 ```
 
@@ -1721,19 +1870,20 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 - [ ] **Step 1: 编写测试**
 
 ```go
-package service
+package service_test
 
 import (
     "testing"
 
     "github.com/stretchr/testify/assert"
     "db-mcp/internal/repository"
+    "db-mcp/internal/service"
 )
 
 func TestNewCRUDService(t *testing.T) {
     repo := repository.New(nil)
-    detector := NewDeleteFieldDetector()
-    audit := NewAuditService(nil, "_audit_logs")
+    detector := service.NewDeleteFieldDetector()
+    audit := service.NewAuditService(nil, "_audit_logs")
 
     service := NewCRUDService(repo, detector, audit)
     assert.NotNil(t, service)
@@ -1834,6 +1984,61 @@ func (s *CRUDService) Delete(req *repository.DeleteRequest) (*repository.Mutatio
     return result, nil
 }
 
+func (s *CRUDService) BatchInsert(req *repository.BatchInsertRequest) (*repository.BatchResult, error) {
+    auditCtx := s.audit.Start("BATCH_INSERT", req.Table, "")
+
+    result, err := s.repo.BatchInsert(req)
+    if err != nil {
+        s.audit.Fail(auditCtx, err.Error())
+        return nil, err
+    }
+
+    s.audit.Success(auditCtx, nil, nil, result.SuccessCount)
+    return result, nil
+}
+
+func (s *CRUDService) BatchUpdate(req *repository.BatchUpdateRequest) (*repository.BatchResult, error) {
+    auditCtx := s.audit.Start("BATCH_UPDATE", req.Table, "")
+
+    result, err := s.repo.BatchUpdate(req)
+    if err != nil {
+        s.audit.Fail(auditCtx, err.Error())
+        return nil, err
+    }
+
+    s.audit.Success(auditCtx, nil, nil, result.SuccessCount)
+    return result, nil
+}
+
+func (s *CRUDService) BatchDelete(req *repository.BatchDeleteRequest) (*repository.BatchResult, error) {
+    auditCtx := s.audit.Start("BATCH_DELETE", req.Table, "")
+
+    deleteField := s.detector.Detect(req.Table, nil)
+    req.DeleteField = deleteField
+
+    result, err := s.repo.BatchLogicalDelete(req)
+    if err != nil {
+        s.audit.Fail(auditCtx, err.Error())
+        return nil, err
+    }
+
+    s.audit.Success(auditCtx, nil, nil, result.SuccessCount)
+    return result, nil
+}
+
+func (s *CRUDService) Join(req *repository.JoinRequest) (*repository.QueryResult, error) {
+    auditCtx := s.audit.Start("SELECT_JOIN", req.Tables[0].Name, "")
+
+    result, err := s.repo.JoinQuery(req)
+    if err != nil {
+        s.audit.Fail(auditCtx, err.Error())
+        return nil, err
+    }
+
+    s.audit.Success(auditCtx, nil, nil, result.Total)
+    return result, nil
+}
+
 func NewDeleteFieldDetector() *detector.DeleteFieldDetector {
     return detector.NewDetector()
 }
@@ -1857,6 +2062,174 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 
 ---
 
+### Task 10: 事务服务
+
+**Files:**
+- Create: `internal/service/transaction.go`
+- Create: `tests/unit/transaction_test.go`
+
+- [ ] **Step 1: 编写测试**
+
+```go
+package service_test
+
+import (
+    "testing"
+
+    "github.com/stretchr/testify/assert"
+    "db-mcp/internal/service"
+)
+
+func TestNewTransactionService(t *testing.T) {
+    svc := service.NewTransactionService(nil, nil)
+    assert.NotNil(t, svc)
+}
+
+func TestTransactionService_Execute_EmptyOperations(t *testing.T) {
+    svc := service.NewTransactionService(nil, nil)
+    req := &service.TransactionRequest{Operations: []service.Operation{}}
+
+    result, err := svc.Execute(req)
+    assert.Error(t, err)
+    assert.Nil(t, result)
+}
+```
+
+- [ ] **Step 2: 运行测试验证失败**
+
+```bash
+go test ./tests/unit/transaction_test.go -v
+# Expected: FAIL
+```
+
+- [ ] **Step 3: 实现事务服务**
+
+```go
+package service
+
+import (
+    "db-mcp/internal/repository"
+)
+
+type TransactionRequest struct {
+    Operations []Operation
+}
+
+type Operation struct {
+    Action string
+    Table  string
+    Data   map[string]interface{}
+    Where  map[string]interface{}
+}
+
+type TransactionResult struct {
+    Success  bool
+    Results  []OperationResult
+    Message  string
+}
+
+type OperationResult struct {
+    Action  string
+    Table   string
+    Success bool
+    Error   string
+}
+
+type TransactionService struct {
+    repo   *repository.Repository
+    audit  *AuditService
+}
+
+func NewTransactionService(repo *repository.Repository, audit *AuditService) *TransactionService {
+    return &TransactionService{
+        repo:  repo,
+        audit: audit,
+    }
+}
+
+func (s *TransactionService) Execute(req *TransactionRequest) (*TransactionResult, error) {
+    if len(req.Operations) < 2 {
+        return nil, &DBError{Code: ErrInvalidInput, Message: "at least 2 operations required"}
+    }
+
+    auditCtx := s.audit.Start("TRANSACTION", "", "")
+
+    results := make([]OperationResult, 0, len(req.Operations))
+    allSuccess := true
+
+    for _, op := range req.Operations {
+        result := s.executeOperation(&op)
+        results = append(results, result)
+        if !result.Success {
+            allSuccess = false
+            break
+        }
+    }
+
+    if allSuccess {
+        s.audit.Success(auditCtx, nil, nil, 0)
+        return &TransactionResult{
+            Success: true,
+            Results: results,
+            Message: "Transaction committed",
+        }, nil
+    }
+
+    s.audit.Fail(auditCtx, "Transaction rolled back")
+    return &TransactionResult{
+        Success: false,
+        Results: results,
+        Message: "Transaction rolled back",
+    }, nil
+}
+
+func (s *TransactionService) executeOperation(op *Operation) OperationResult {
+    switch op.Action {
+    case "insert":
+        req := &repository.InsertRequest{Table: op.Table, Data: op.Data}
+        _, err := s.repo.Insert(req)
+        if err != nil {
+            return OperationResult{Action: op.Action, Table: op.Table, Success: false, Error: err.Error()}
+        }
+        return OperationResult{Action: op.Action, Table: op.Table, Success: true}
+    case "update":
+        req := &repository.UpdateRequest{Table: op.Table, Data: op.Data, Where: op.Where}
+        _, err := s.repo.Update(req)
+        if err != nil {
+            return OperationResult{Action: op.Action, Table: op.Table, Success: false, Error: err.Error()}
+        }
+        return OperationResult{Action: op.Action, Table: op.Table, Success: true}
+    case "delete":
+        req := &repository.DeleteRequest{Table: op.Table, Where: op.Where}
+        _, err := s.repo.LogicalDelete(req)
+        if err != nil {
+            return OperationResult{Action: op.Action, Table: op.Table, Success: false, Error: err.Error()}
+        }
+        return OperationResult{Action: op.Action, Table: op.Table, Success: true}
+    default:
+        return OperationResult{Action: op.Action, Table: op.Table, Success: false, Error: "unknown action"}
+    }
+}
+```
+
+- [ ] **Step 4: 运行测试验证通过**
+
+```bash
+go test ./tests/unit/transaction_test.go -v
+# Expected: PASS
+```
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add internal/service/transaction.go tests/unit/transaction_test.go
+git commit -m "feat: add transaction service
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+```
+
+---
+
 ## 阶段五：中间件
 
 ### Task 10: 限流中间件
@@ -1868,7 +2241,7 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 - [ ] **Step 1: 编写测试**
 
 ```go
-package middleware
+package middleware_test
 
 import (
     "testing"
@@ -1876,6 +2249,7 @@ import (
 
     "github.com/stretchr/testify/assert"
     "db-mcp/internal/config"
+    "db-mcp/internal/middleware"
 )
 
 func TestNewRateLimiter_Enabled(t *testing.T) {
@@ -2011,17 +2385,18 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 - [ ] **Step 1: 编写测试**
 
 ```go
-package middleware
+package middleware_test
 
 import (
     "testing"
     "time"
 
     "github.com/stretchr/testify/assert"
+    "db-mcp/internal/middleware"
 )
 
 func TestDefaultTimeoutConfig(t *testing.T) {
-    cfg := DefaultTimeoutConfig()
+    cfg := middleware.DefaultTimeoutConfig()
 
     assert.Equal(t, 5*time.Second, cfg.Connect)
     assert.Equal(t, 30*time.Second, cfg.Query)
@@ -2119,7 +2494,7 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 - [ ] **Step 1: 编写测试**
 
 ```go
-package mcp
+package mcp_test
 
 import (
     "testing"
@@ -2296,7 +2671,9 @@ package main
 
 import (
     "context"
+    "encoding/json"
     "flag"
+    "fmt"
     "log"
     "os"
     "os/signal"
@@ -2304,7 +2681,15 @@ import (
 
     "db-mcp/internal/config"
     "db-mcp/internal/connection"
+    "db-mcp/internal/detector"
+    "db-mcp/internal/middleware"
+    "db-mcp/internal/mcp"
+    "db-mcp/internal/repository"
+    "db-mcp/internal/service"
     "db-mcp/pkg/logger"
+
+    "github.com/mark3labs/mcp-go-go-sdk/mcp"
+    "github.com/mark3labs/mcp-go-go-sdk/server"
 )
 
 func main() {
@@ -2318,36 +2703,104 @@ func main() {
     }
 
     // 初始化日志
-    log := logger.NewLogger(&cfg.Log)
+    appLog := logger.NewLogger(&cfg.Log)
 
     // 初始化数据库连接
-    connMgr, err := connection.NewConnectionManager(cfg, log)
+    connMgr, err := connection.NewConnectionManager(cfg, appLog)
     if err != nil {
-        log.Error("Failed to connect database", "error", err)
+        appLog.Error("Failed to connect database", "error", err)
         os.Exit(1)
     }
     defer connMgr.Close()
 
-    log.Info("database connected",
+    appLog.Info("database connected",
         "host", cfg.Database.Host,
         "database", cfg.Database.Database)
 
     // 健康检查
     if err := connMgr.HealthCheck(); err != nil {
-        log.Error("health check failed", "error", err)
+        appLog.Error("health check failed", "error", err)
         os.Exit(1)
     }
 
-    log.Info("server started",
+    // 初始化服务
+    repo := repository.New(connMgr.DB())
+    deleteDetector := detector.NewDetector()
+    auditService := service.NewAuditService(repo, cfg.Log.AuditTable)
+    crudService := service.NewCRUDService(repo, deleteDetector, auditService)
+    transactionService := service.NewTransactionService(repo, auditService)
+
+    // 初始化中间件
+    rateLimiter := middleware.NewRateLimiter(&cfg.RateLimit)
+    timeoutConfig := middleware.DefaultTimeoutConfig()
+
+    // 创建 MCP 服务器
+    srv := server.NewMCPServer("db-mcp", "1.0.0")
+
+    // 注册 MCP 工具
+    registerTools(srv, crudService, transactionService, deleteDetector, repo, rateLimiter, timeoutConfig)
+
+    appLog.Info("server started",
         "host", cfg.Database.Host,
         "port", cfg.Database.Port)
 
-    // 等待信号
-    sig := make(chan os.Signal, 1)
-    signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-    <-sig
+    // 运行 MCP 服务器
+    ctx := context.Background()
+    err = srv.Run(ctx)
+    if err != nil {
+        appLog.Error("server error", "error", err)
+        os.Exit(1)
+    }
+}
 
-    log.Info("server shutting down")
+// registerTools 注册所有 MCP 工具
+func registerTools(
+    srv *server.MCPServer,
+    crudService *service.CRUDService,
+    txService *service.TransactionService,
+    detector *detector.DeleteFieldDetector,
+    repo *repository.Repository,
+    rateLimiter *middleware.RateLimiter,
+    timeoutCfg *middleware.TimeoutConfig,
+) {
+    // db_query
+    srv.AddTool(mcp.NewTool("db_query",
+        mcp.WithDescription("查询单表数据"),
+        mcp.WithInputSchema(map[string]interface{}{
+            "type": "object",
+            "properties": map[string]interface{}{
+                "table":  map[string]interface{}{"type": "string"},
+                "fields": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+                "where":  map[string]interface{}{"type": "object"},
+                "limit":  map[string]interface{}{"type": "integer", "default": 100},
+            },
+            "required": []string{"table"},
+        }),
+    ), func(ctx context.Context, req mcp.ToolRequest) (interface{}, error) {
+        var params mcp.QueryRequest
+        json.Unmarshal(req.Input, &params)
+        return crudService.Query(ctx, &params)
+    })
+
+    // db_insert
+    srv.AddTool(mcp.NewTool("db_insert",
+        mcp.WithDescription("插入数据"),
+        mcp.WithInputSchema(map[string]interface{}{
+            "type": "object",
+            "properties": map[string]interface{}{
+                "table": map[string]interface{}{"type": "string"},
+                "data":  map[string]interface{}{"type": "object"},
+            },
+            "required": []string{"table", "data"},
+        }),
+    ), func(ctx context.Context, req mcp.ToolRequest) (interface{}, error) {
+        var params mcp.InsertRequest
+        json.Unmarshal(req.Input, &params)
+        return crudService.Insert(ctx, &params)
+    })
+
+    // ... 其他工具类似注册 ...
+    // db_update, db_delete, db_batch_insert, db_batch_update, db_batch_delete, db_join, db_transaction, db_describe
 }
 ```
 
