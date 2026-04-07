@@ -1,0 +1,23 @@
+linters:
+  enable:
+    - gofmt
+    - goimports
+    - govet
+    - errcheck
+    - staticcheck
+    - typecheck
+    - gosimple
+    - ineffassign
+    - goconst
+    - gocyclo
+    - funlen
+
+linters-settings:
+  gocyclo:
+    min-complexity: 15
+  funlen:
+    lines: 50
+    statements: 40
+
+run:
+  timeout: 5m
