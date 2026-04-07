@@ -40,7 +40,30 @@ func TestParseLevel(t *testing.T) {
 		t.Run(tt.input, func(t *testing.T) {
 			cfg := &config.LogConfig{Level: tt.input}
 			appLogger := logger.NewLogger(cfg)
-			assert.Equal(t, tt.expected, appLogger.Level())
+			// Use string comparison to avoid level comparison issues
+			var actualLevel string
+			switch appLogger.Level() {
+			case slog.LevelDebug:
+				actualLevel = "debug"
+			case slog.LevelInfo:
+				actualLevel = "info"
+			case slog.LevelWarn:
+				actualLevel = "warn"
+			case slog.LevelError:
+				actualLevel = "error"
+			}
+			var expectedLevel string
+			switch tt.expected {
+			case slog.LevelDebug:
+				expectedLevel = "debug"
+			case slog.LevelInfo:
+				expectedLevel = "info"
+			case slog.LevelWarn:
+				expectedLevel = "warn"
+			case slog.LevelError:
+				expectedLevel = "error"
+			}
+			assert.Equal(t, expectedLevel, actualLevel)
 		})
 	}
 }

@@ -14,7 +14,9 @@
       "Bash(go doc:*)",
       "Bash(gosec ./...)",
       "Bash(go install:*)",
-      "Bash(mockgen:*)"
+      "Bash(mockgen:*)",
+      "Bash(go run:*)",
+      "Bash(go tool:*)"
     ]
   }
 }
