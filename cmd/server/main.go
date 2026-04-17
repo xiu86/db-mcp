@@ -55,7 +55,12 @@ func main() {
 	log.Info("Database connection established")
 
 	// Create MCP server (this also initializes the audit service)
-	mcpSvc := mcpserver.NewMCPServer(connManager, cfg, log)
+	mcpSvc, err := mcpserver.NewMCPServer(connManager, cfg, log)
+	if err != nil {
+		log.Error("Failed to create MCP server", "error", err)
+		connManager.Close()
+		os.Exit(1)
+	}
 
 	// Determine transport mode
 	transport := cfg.MCP.Transport

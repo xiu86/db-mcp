@@ -153,7 +153,7 @@ v0.0.1 的单 `database` 配置格式仍然兼容，会自动转换为 `database
 ./bin/db-mcp -config /absolute/path/to/config.yaml
 ```
 
-服务入口见 `cmd/server/main.go:26`。
+The server entry point is in `cmd/server/main.go`.
 
 ## Use with Claude Code
 
@@ -450,7 +450,7 @@ claude mcp add --transport sse db-mcp http://localhost:8080/sse \
 {}
 ```
 
-工具注册位置见 `internal/mcp/tools.go:114`。
+See `internal/mcp/tools.go` for tool registration.
 
 ## Logical Delete Detection
 
@@ -519,7 +519,7 @@ make test
 make test-coverage
 ```
 
-对应命令定义见 `Makefile:3`。
+See `Makefile` for command definitions.
 
 ## Security Notes
 

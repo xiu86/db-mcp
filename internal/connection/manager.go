@@ -3,7 +3,6 @@ package connection
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"time"
 
 	"db-mcp/internal/config"
@@ -197,17 +196,4 @@ func (m *ConnectionManager) Close() error {
 		}
 	}
 	return lastErr
-}
-
-func BuildDSN(cfg *config.DatabaseConfig) string {
-	escapedUser := url.QueryEscape(cfg.User)
-	escapedPassword := url.QueryEscape(cfg.Password)
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
-		escapedUser,
-		escapedPassword,
-		cfg.Host,
-		cfg.Port,
-		cfg.Database,
-		cfg.Charset,
-	)
 }

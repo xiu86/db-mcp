@@ -9,6 +9,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewMCPServer(t *testing.T) {
@@ -26,7 +27,8 @@ func TestNewMCPServer(t *testing.T) {
 	}
 	log := logger.NewLogger(&config.LogConfig{Level: "info", Format: "text", Output: "stdout"})
 
-	server := NewMCPServer(nil, cfg, log)
+	server, err := NewMCPServer(nil, cfg, log)
+	require.NoError(t, err)
 
 	assert.NotNil(t, server)
 	assert.NotNil(t, server.server)
@@ -38,7 +40,8 @@ func TestMCPServer_GetServer(t *testing.T) {
 	cfg := config.DefaultConfig()
 	log := logger.NewLogger(&config.LogConfig{Level: "info", Format: "text", Output: "stdout"})
 
-	server := NewMCPServer(nil, cfg, log)
+	server, err := NewMCPServer(nil, cfg, log)
+	require.NoError(t, err)
 
 	mcpServer := server.GetServer()
 	assert.NotNil(t, mcpServer)
@@ -377,7 +380,8 @@ func TestMCPServer_Request_Parsing(t *testing.T) {
 	log := logger.NewLogger(&config.LogConfig{Level: "info", Format: "text", Output: "stdout"})
 
 	t.Run("Insert request", func(t *testing.T) {
-		_ = NewMCPServer(nil, cfg, log)
+		_, err := NewMCPServer(nil, cfg, log)
+	require.NoError(t, err)
 
 		req := mcp.CallToolRequest{}
 		req.Params.Arguments = map[string]interface{}{
@@ -394,7 +398,8 @@ func TestMCPServer_Request_Parsing(t *testing.T) {
 	})
 
 	t.Run("Update request", func(t *testing.T) {
-		_ = NewMCPServer(nil, cfg, log)
+		_, err := NewMCPServer(nil, cfg, log)
+	require.NoError(t, err)
 
 		req := mcp.CallToolRequest{}
 		req.Params.Arguments = map[string]interface{}{
@@ -414,7 +419,8 @@ func TestMCPServer_Request_Parsing(t *testing.T) {
 	})
 
 	t.Run("Delete request", func(t *testing.T) {
-		_ = NewMCPServer(nil, cfg, log)
+		_, err := NewMCPServer(nil, cfg, log)
+	require.NoError(t, err)
 
 		req := mcp.CallToolRequest{}
 		req.Params.Arguments = map[string]interface{}{
@@ -430,7 +436,8 @@ func TestMCPServer_Request_Parsing(t *testing.T) {
 	})
 
 	t.Run("BatchInsert request", func(t *testing.T) {
-		_ = NewMCPServer(nil, cfg, log)
+		_, err := NewMCPServer(nil, cfg, log)
+	require.NoError(t, err)
 
 		req := mcp.CallToolRequest{}
 		req.Params.Arguments = map[string]interface{}{
@@ -451,7 +458,8 @@ func TestMCPServer_Request_Parsing(t *testing.T) {
 	})
 
 	t.Run("BatchUpdate request", func(t *testing.T) {
-		_ = NewMCPServer(nil, cfg, log)
+		_, err := NewMCPServer(nil, cfg, log)
+	require.NoError(t, err)
 
 		req := mcp.CallToolRequest{}
 		req.Params.Arguments = map[string]interface{}{
@@ -469,7 +477,8 @@ func TestMCPServer_Request_Parsing(t *testing.T) {
 	})
 
 	t.Run("BatchDelete request", func(t *testing.T) {
-		_ = NewMCPServer(nil, cfg, log)
+		_, err := NewMCPServer(nil, cfg, log)
+	require.NoError(t, err)
 
 		req := mcp.CallToolRequest{}
 		req.Params.Arguments = map[string]interface{}{
@@ -487,7 +496,8 @@ func TestMCPServer_Request_Parsing(t *testing.T) {
 	})
 
 	t.Run("Join request", func(t *testing.T) {
-		_ = NewMCPServer(nil, cfg, log)
+		_, err := NewMCPServer(nil, cfg, log)
+	require.NoError(t, err)
 
 		req := mcp.CallToolRequest{}
 		req.Params.Arguments = map[string]interface{}{
@@ -524,7 +534,8 @@ func TestMCPServer_Request_Parsing(t *testing.T) {
 	})
 
 	t.Run("Transaction request", func(t *testing.T) {
-		_ = NewMCPServer(nil, cfg, log)
+		_, err := NewMCPServer(nil, cfg, log)
+	require.NoError(t, err)
 
 		req := mcp.CallToolRequest{}
 		req.Params.Arguments = map[string]interface{}{
@@ -553,7 +564,8 @@ func TestMCPServer_Request_Parsing(t *testing.T) {
 	})
 
 	t.Run("Schema request", func(t *testing.T) {
-		_ = NewMCPServer(nil, cfg, log)
+		_, err := NewMCPServer(nil, cfg, log)
+	require.NoError(t, err)
 
 		req := mcp.CallToolRequest{}
 		req.Params.Arguments = map[string]interface{}{
@@ -626,7 +638,8 @@ func TestMCPServer_Config_Passing(t *testing.T) {
 	}
 
 	log := logger.NewLogger(&cfg.Log)
-	server := NewMCPServer(nil, cfg, log)
+	server, err := NewMCPServer(nil, cfg, log)
+	require.NoError(t, err)
 
 	assert.NotNil(t, server)
 	assert.NotNil(t, server.config)

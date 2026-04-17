@@ -4,10 +4,10 @@ import (
 	"db-mcp/internal/driver"
 )
 
-// RepositoryInterface 是 DatabaseDriver 的别名
+// RepositoryInterface is an alias for DatabaseDriver
 type RepositoryInterface = driver.DatabaseDriver
 
-// 类型别名 - 导出 driver 包的类型供外部使用
+// Type aliases - export driver package types for external use
 type (
 	QueryRequest       = driver.QueryRequest
 	InsertRequest      = driver.InsertRequest

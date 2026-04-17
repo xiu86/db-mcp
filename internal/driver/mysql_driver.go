@@ -16,14 +16,14 @@ import (
 	"gorm.io/gorm"
 )
 
-// MySQLDriver MySQL驱动实现
+// MySQLDriver implements the MySQL database driver
 type MySQLDriver struct {
 	db     *gorm.DB
 	config *config.DatabaseConfig
 	logger *logger.Logger
 }
 
-// NewMySQLDriver 创建MySQL驱动
+// NewMySQLDriver creates a new MySQL driver
 func NewMySQLDriver(cfg *config.DatabaseConfig, log *logger.Logger) (*MySQLDriver, error) {
 	dsn := buildDSN(cfg)
 
@@ -45,7 +45,7 @@ func NewMySQLDriver(cfg *config.DatabaseConfig, log *logger.Logger) (*MySQLDrive
 	return &MySQLDriver{db: db, config: cfg, logger: log}, nil
 }
 
-// NewMySQLDriverWithPool 创建MySQL驱动(带连接池配置)
+// NewMySQLDriverWithPool creates a MySQL driver with connection pool config
 func NewMySQLDriverWithPool(cfg *config.DatabaseConfig, poolCfg *config.PoolConfig, log *logger.Logger) (*MySQLDriver, error) {
 	dsn := buildDSN(cfg)
 
@@ -69,7 +69,7 @@ func NewMySQLDriverWithPool(cfg *config.DatabaseConfig, poolCfg *config.PoolConf
 	return &MySQLDriver{db: db, config: cfg, logger: log}, nil
 }
 
-// buildDSN 构建MySQL DSN
+// buildDSN builds a MySQL DSN
 func buildDSN(cfg *config.DatabaseConfig) string {
 	escapedUser := url.QueryEscape(cfg.User)
 	escapedPassword := url.QueryEscape(cfg.Password)
@@ -83,7 +83,7 @@ func buildDSN(cfg *config.DatabaseConfig) string {
 	)
 }
 
-// Ping 检查连接
+// Ping checks the connection
 func (d *MySQLDriver) Ping(ctx context.Context) error {
 	sqlDB, err := d.db.DB()
 	if err != nil {
@@ -92,7 +92,7 @@ func (d *MySQLDriver) Ping(ctx context.Context) error {
 	return sqlDB.PingContext(ctx)
 }
 
-// Close 关闭连接
+// Close closes the connection
 func (d *MySQLDriver) Close() error {
 	sqlDB, err := d.db.DB()
 	if err != nil {
@@ -101,39 +101,42 @@ func (d *MySQLDriver) Close() error {
 	return sqlDB.Close()
 }
 
-// DriverType 获取驱动类型
+// DriverType returns the driver type
 func (d *MySQLDriver) DriverType() DriverType {
 	return DriverMySQL
 }
 
-// GetDB 获取GORM DB实例（向后兼容）
+// GetDB returns the GORM DB instance (backward compatibility)
 func (d *MySQLDriver) GetDB() *gorm.DB {
 	return d.db
 }
 
-// CurrentDatabase 获取当前数据库
+// CurrentDatabase returns the current database
 func (d *MySQLDriver) CurrentDatabase() string {
 	return d.config.Database
 }
 
-// UseDatabase 切换数据库
+// UseDatabase switches to the specified database
 func (d *MySQLDriver) UseDatabase(database string) error {
 	if database == "" {
 		return errors.NewError(errors.ErrInvalidInput, "database name cannot be empty", nil)
 	}
+	if err := sanitizer.ValidateTableName(database); err != nil {
+		return errors.NewError(errors.ErrInvalidInput, "invalid database name", err)
+	}
 
-	// 使用 USE DATABASE 切换
+	// Use USE DATABASE to switch
 	result := d.db.Exec(fmt.Sprintf("USE `%s`", database))
 	if result.Error != nil {
 		return errors.WrapGormError(result.Error)
 	}
 
-	// 更新配置中的数据库名
+	// Update database name in config
 	d.config.Database = database
 	return nil
 }
 
-// Query 查询数据
+// Query executes a SELECT query
 func (d *MySQLDriver) Query(ctx context.Context, req *QueryRequest) (*QueryResult, error) {
 	if err := sanitizer.ValidateTableName(req.Table); err != nil {
 		return nil, err
@@ -180,7 +183,7 @@ func (d *MySQLDriver) Query(ctx context.Context, req *QueryRequest) (*QueryResul
 	return &QueryResult{Rows: rows, Total: total}, nil
 }
 
-// Insert 插入数据
+// Insert inserts data into the table
 func (d *MySQLDriver) Insert(ctx context.Context, req *InsertRequest) (*MutationResult, error) {
 	if err := sanitizer.ValidateTableName(req.Table); err != nil {
 		return nil, err
@@ -198,7 +201,7 @@ func (d *MySQLDriver) Insert(ctx context.Context, req *InsertRequest) (*Mutation
 	}, nil
 }
 
-// Update 更新数据
+// Update updates data in the table
 func (d *MySQLDriver) Update(ctx context.Context, req *UpdateRequest) (*MutationResult, error) {
 	if err := sanitizer.ValidateTableName(req.Table); err != nil {
 		return nil, err
@@ -215,7 +218,7 @@ func (d *MySQLDriver) Update(ctx context.Context, req *UpdateRequest) (*Mutation
 	}, nil
 }
 
-// Delete 逻辑删除
+// Delete performs logical delete
 func (d *MySQLDriver) Delete(ctx context.Context, req *DeleteRequest) (*MutationResult, error) {
 	if err := sanitizer.ValidateTableName(req.Table); err != nil {
 		return nil, err
@@ -244,7 +247,7 @@ func (d *MySQLDriver) Delete(ctx context.Context, req *DeleteRequest) (*Mutation
 	}, nil
 }
 
-// BatchInsert 批量插入
+// BatchInsert inserts multiple records
 func (d *MySQLDriver) BatchInsert(ctx context.Context, req *BatchInsertRequest) (*BatchResult, error) {
 	if err := sanitizer.ValidateTableName(req.Table); err != nil {
 		return nil, err
@@ -270,7 +273,7 @@ func (d *MySQLDriver) BatchInsert(ctx context.Context, req *BatchInsertRequest) 
 	}, nil
 }
 
-// BatchUpdate 批量更新
+// BatchUpdate updates multiple records
 func (d *MySQLDriver) BatchUpdate(ctx context.Context, req *BatchUpdateRequest) (*BatchResult, error) {
 	if err := sanitizer.ValidateTableName(req.Table); err != nil {
 		return nil, err
@@ -315,7 +318,7 @@ func (d *MySQLDriver) BatchUpdate(ctx context.Context, req *BatchUpdateRequest) 
 	}, nil
 }
 
-// BatchDelete 批量逻辑删除
+// BatchDelete performs batch logical delete
 func (d *MySQLDriver) BatchDelete(ctx context.Context, req *BatchDeleteRequest) (*BatchResult, error) {
 	if err := sanitizer.ValidateTableName(req.Table); err != nil {
 		return nil, err
@@ -364,7 +367,7 @@ func (d *MySQLDriver) BatchDelete(ctx context.Context, req *BatchDeleteRequest) 
 	}, nil
 }
 
-// JoinQuery Join查询
+// JoinQuery executes a join query
 func (d *MySQLDriver) JoinQuery(ctx context.Context, req *JoinRequest) (*QueryResult, error) {
 	if len(req.Tables) < 2 {
 		return nil, errors.NewError(errors.ErrInvalidInput, "at least 2 tables required for join", nil)
@@ -463,7 +466,7 @@ func (d *MySQLDriver) JoinQuery(ctx context.Context, req *JoinRequest) (*QueryRe
 	return &QueryResult{Rows: rows, Total: int64(len(rows))}, nil
 }
 
-// GetTableSchema 获取表结构
+// GetTableSchema returns the table schema
 func (d *MySQLDriver) GetTableSchema(tableName string) (*TableSchema, error) {
 	if err := sanitizer.ValidateTableName(tableName); err != nil {
 		return nil, err

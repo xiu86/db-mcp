@@ -6,40 +6,40 @@ import (
 	"db-mcp/internal/detector"
 )
 
-// DatabaseDriver 数据库驱动接口
+// DatabaseDriver defines the database driver interface
 type DatabaseDriver interface {
-	// 连接管理
+	// Connection management
 	Ping(ctx context.Context) error
 	Close() error
 
-	// 基础操作
+	// Basic operations
 	Query(ctx context.Context, req *QueryRequest) (*QueryResult, error)
 	Insert(ctx context.Context, req *InsertRequest) (*MutationResult, error)
 	Update(ctx context.Context, req *UpdateRequest) (*MutationResult, error)
 	Delete(ctx context.Context, req *DeleteRequest) (*MutationResult, error)
 
-	// 批量操作
+	// Batch operations
 	BatchInsert(ctx context.Context, req *BatchInsertRequest) (*BatchResult, error)
 	BatchUpdate(ctx context.Context, req *BatchUpdateRequest) (*BatchResult, error)
 	BatchDelete(ctx context.Context, req *BatchDeleteRequest) (*BatchResult, error)
 
-	// Join查询 (仅MySQL支持，MongoDB返回错误)
+	// Join query (MySQL only, MongoDB returns error)
 	JoinQuery(ctx context.Context, req *JoinRequest) (*QueryResult, error)
 
-	// Schema操作
+	// Schema operations
 	GetTableSchema(tableName string) (*TableSchema, error)
 
-	// 库切换 (MySQL使用USE DATABASE, MongoDB切换database)
+	// Database switch (MySQL uses USE DATABASE, MongoDB switches database)
 	UseDatabase(database string) error
 
-	// 获取当前库名
+	// Get current database name
 	CurrentDatabase() string
 
-	// 获取驱动类型
+	// Get driver type
 	DriverType() DriverType
 }
 
-// DriverType 驱动类型
+// DriverType represents the driver type
 type DriverType string
 
 const (
@@ -47,7 +47,7 @@ const (
 	DriverMongoDB DriverType = "mongodb"
 )
 
-// QueryRequest 查询请求
+// QueryRequest represents a query request
 type QueryRequest struct {
 	Table  string
 	Fields []string
@@ -57,46 +57,46 @@ type QueryRequest struct {
 	Offset int
 }
 
-// OrderBy 排序
+// OrderBy represents an ordering specification
 type OrderBy struct {
 	Field     string
 	Direction string
 }
 
-// InsertRequest 插入请求
+// InsertRequest represents an insert request
 type InsertRequest struct {
 	Table string
 	Data  map[string]interface{}
 }
 
-// UpdateRequest 更新请求
+// UpdateRequest represents an update request
 type UpdateRequest struct {
 	Table string
 	Data  map[string]interface{}
 	Where map[string]interface{}
 }
 
-// DeleteRequest 删除请求
+// DeleteRequest represents a delete request
 type DeleteRequest struct {
 	Table       string
 	Where       map[string]interface{}
 	DeleteField *detector.DeleteFieldInfo
 }
 
-// BatchInsertRequest 批量插入请求
+// BatchInsertRequest represents a batch insert request
 type BatchInsertRequest struct {
 	Table string
 	Data  []map[string]interface{}
 }
 
-// BatchUpdateRequest 批量更新请求
+// BatchUpdateRequest represents a batch update request
 type BatchUpdateRequest struct {
 	Table    string
 	Data     []map[string]interface{}
 	KeyField string
 }
 
-// BatchDeleteRequest 批量删除请求
+// BatchDeleteRequest represents a batch delete request
 type BatchDeleteRequest struct {
 	Table       string
 	IDs         []string
@@ -104,7 +104,7 @@ type BatchDeleteRequest struct {
 	DeleteField *detector.DeleteFieldInfo
 }
 
-// JoinRequest Join查询请求
+// JoinRequest represents a join query request
 type JoinRequest struct {
 	Tables []TableRef
 	Joins  []JoinClause
@@ -114,13 +114,13 @@ type JoinRequest struct {
 	Limit  int
 }
 
-// TableRef 表引用
+// TableRef represents a table reference
 type TableRef struct {
 	Name  string
 	Alias string
 }
 
-// JoinClause Join子句
+// JoinClause represents a join clause
 type JoinClause struct {
 	Type      string
 	FromTable string
@@ -129,40 +129,40 @@ type JoinClause struct {
 	ToField   string
 }
 
-// QueryResult 查询结果
+// QueryResult represents a query result
 type QueryResult struct {
 	Rows    []map[string]interface{}
 	Total   int64
 	Message string
 }
 
-// MutationResult 变更结果
+// MutationResult represents a mutation result
 type MutationResult struct {
 	AffectedRows int64
 	LastInsertID int64
 	Message      string
 }
 
-// BatchResult 批量操作结果
+// BatchResult represents a batch operation result
 type BatchResult struct {
 	SuccessCount int64
 	FailedCount  int64
 	Errors       []BatchError
 }
 
-// BatchError 批量错误
+// BatchError represents a batch error
 type BatchError struct {
 	Index   int
 	Message string
 }
 
-// TableSchema 表结构
+// TableSchema represents a table schema
 type TableSchema struct {
 	TableName string
 	Columns   []ColumnInfo
 }
 
-// ColumnInfo 列信息
+// ColumnInfo represents column information
 type ColumnInfo struct {
 	Name          string
 	DataType      string

@@ -33,8 +33,8 @@ func setupL3(t *testing.T) {
 			Host:     getEnvOrDefault("DB_HOST", "localhost"),
 			Port:     3306,
 			User:     getEnvOrDefault("DB_USER", "root"),
-			Password: getEnvOrDefault("DB_PASSWORD", "123456"),
-			Database: getEnvOrDefault("DB_NAME", "video-core_gzminjieadmin_test"),
+			Password: getEnvOrDefault("DB_PASSWORD", ""),
+			Database: getEnvOrDefault("DB_NAME", "test_db"),
 			Charset:  "utf8mb4",
 		},
 		Log: config.LogConfig{

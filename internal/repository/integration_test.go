@@ -30,8 +30,8 @@ func getTestConfig() *TestConfig {
 		Host:     getEnv("TEST_DB_HOST", "127.0.0.1"),
 		Port:     getEnv("TEST_DB_PORT", "3306"),
 		User:     getEnv("TEST_DB_USER", "root"),
-		Password: getEnv("TEST_DB_PASSWORD", "123456"),
-		Database: getEnv("TEST_DB_NAME", "video-core_gzminjieadmin_test"),
+		Password: getEnv("TEST_DB_PASSWORD", ""),
+		Database: getEnv("TEST_DB_NAME", "test_db"),
 	}
 }
 

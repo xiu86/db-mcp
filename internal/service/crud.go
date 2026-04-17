@@ -189,14 +189,14 @@ func (s *CRUDService) Join(ctx context.Context, req *driver.JoinRequest) (*drive
 	return result, nil
 }
 
-// GetSchema 获取表结构及检测到的删除字段
+// GetSchema returns table schema and detected delete fields
 func (s *CRUDService) GetSchema(ctx context.Context, table string) (map[string]interface{}, error) {
 	schema, err := s.repo.GetTableSchema(table)
 	if err != nil {
 		return nil, err
 	}
 
-	// 检测删除字段
+	// Detect delete fields
 	columns := s.toDetectorColumns(schema.Columns)
 	deleteField := s.detector.Detect(table, columns)
 

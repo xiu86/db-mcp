@@ -30,7 +30,7 @@ func TestMain(m *testing.M) {
 			Host:     getEnvOrDefault("DB_HOST", "localhost"),
 			Port:     3306,
 			User:     getEnvOrDefault("DB_USER", "root"),
-			Password: getEnvOrDefault("DB_PASSWORD", "secret"),
+			Password: getEnvOrDefault("DB_PASSWORD", ""),
 			Database: getEnvOrDefault("DB_NAME", "test_db"),
 			Charset:  "utf8mb4",
 		},

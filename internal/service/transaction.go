@@ -190,14 +190,3 @@ func (tc *TransactionContext) getTableColumns(table string) []detector.ColumnInf
 	}
 	return cols
 }
-
-func joinFields(fields []string) string {
-	result := ""
-	for i, f := range fields {
-		if i > 0 {
-			result += ", "
-		}
-		result += f
-	}
-	return result
-}

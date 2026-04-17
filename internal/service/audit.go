@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gorm.io/gorm"
@@ -41,6 +42,11 @@ type AuditContext struct {
 	AfterData  map[string]interface{}
 	SQL        string
 }
+
+// Context key type for request ID in context
+type contextKey string
+
+const requestIDKey contextKey = "requestID"
 
 type AuditService struct {
 	mu    sync.Mutex
@@ -94,6 +100,19 @@ func (s *AuditService) Start(operation, table, recordID string) *AuditContext {
 		StartTime:  time.Now(),
 		BeforeData: make(map[string]interface{}),
 	}
+}
+
+// StartWithContext creates a new AuditContext and returns it along with a context containing the request ID.
+func (s *AuditService) StartWithContext(ctx context.Context, operation, table, recordID string) (context.Context, *AuditContext) {
+	auditCtx := &AuditContext{
+		RequestID:  generateRequestID(),
+		Operation:  operation,
+		Table:      table,
+		RecordID:   recordID,
+		StartTime:  time.Now(),
+		BeforeData: make(map[string]interface{}),
+	}
+	return setRequestIDInContext(ctx, auditCtx.RequestID), auditCtx
 }
 
 func (s *AuditService) Success(ctx *AuditContext, beforeData, afterData interface{}, affectedRows int64) {
@@ -173,11 +192,11 @@ type auditSQLLogger struct {
 	prev logger.Interface
 }
 
-// lastSQL stores the most recently executed SQL (thread-safe).
-var lastSQL struct {
-	mu  sync.Mutex
-	val string
-}
+// sqlCache stores SQL statements keyed by request ID for concurrent access
+var sqlCache sync.Map
+
+// lastSQLAtomic stores the most recently executed SQL (backward compatibility fallback)
+var lastSQLAtomic atomic.Value // stores string
 
 func (l *auditSQLLogger) LogMode(level logger.LogLevel) logger.Interface {
 	if l.prev != nil {
@@ -212,23 +231,53 @@ func (l *auditSQLLogger) Trace(ctx context.Context, begin time.Time, fc func() (
 	// Clean up the SQL string: remove newlines and extra spaces for readability
 	cleanSQL := strings.Join(strings.Fields(sql), " ")
 
-	lastSQL.mu.Lock()
-	lastSQL.val = cleanSQL
-	lastSQL.mu.Unlock()
+	// Store in atomic fallback for backward compatibility
+	lastSQLAtomic.Store(cleanSQL)
+
+	// Store in sqlCache keyed by request ID if available in context
+	if requestID := getRequestIDFromContext(ctx); requestID != "" {
+		sqlCache.Store(requestID, cleanSQL)
+	}
 
 	if l.prev != nil {
 		l.prev.Trace(ctx, begin, fc, err)
 	}
 }
 
-// GetLastSQL returns the most recently captured SQL statement.
+// GetLastSQL returns the most recently captured SQL statement (fallback for backward compatibility).
 func GetLastSQL() string {
-	lastSQL.mu.Lock()
-	defer lastSQL.mu.Unlock()
-	return lastSQL.val
+	if val := lastSQLAtomic.Load(); val != nil {
+		return val.(string)
+	}
+	return ""
+}
+
+// getRequestIDFromContext extracts the request ID from the context.
+func getRequestIDFromContext(ctx context.Context) string {
+	if val := ctx.Value(requestIDKey); val != nil {
+		if requestID, ok := val.(string); ok {
+			return requestID
+		}
+	}
+	return ""
+}
+
+// setRequestIDInContext sets the request ID in the context.
+func setRequestIDInContext(ctx context.Context, requestID string) context.Context {
+	return context.WithValue(ctx, requestIDKey, requestID)
 }
 
 // CaptureSQLForContext sets the captured SQL on the given AuditContext.
 func CaptureSQLForContext(ctx *AuditContext) {
+	// First try to get SQL from sqlCache using the context's RequestID
+	if ctx.RequestID != "" {
+		if val, ok := sqlCache.Load(ctx.RequestID); ok {
+			if sql, ok := val.(string); ok {
+				ctx.SQL = sql
+				return
+			}
+		}
+	}
+	// Fallback to the atomic value
 	ctx.SQL = GetLastSQL()
 }

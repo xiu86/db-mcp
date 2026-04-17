@@ -207,7 +207,7 @@ database:
   host: localhost
   port: 3306
   user: root
-  password: secret
+  password: YOUR_DB_PASSWORD_HERE
   database: testdb
 `)
     tmpFile.Close()
@@ -246,7 +246,7 @@ func TestLoadFromMCP(t *testing.T) {
         "host":     "mcphost",
         "port":     float64(3307),
         "user":     "mcpuser",
-        "password": "mcpsecret",
+        "password": "YOUR_TOKEN_HERE",
         "database": "mcpdb",
     }
 
@@ -803,13 +803,13 @@ func TestBuildDSN(t *testing.T) {
         Host:     "localhost",
         Port:     3306,
         User:     "root",
-        Password: "secret",
+        Password: "YOUR_DB_PASSWORD_HERE",
         Database: "testdb",
         Charset:  "utf8mb4",
     }
 
     dsn := buildDSN(cfg)
-    assert.Contains(t, dsn, "root:secret")
+    assert.Contains(t, dsn, "root:YOUR_DB_PASSWORD_HERE")
     assert.Contains(t, dsn, "tcp(localhost:3306)")
     assert.Contains(t, dsn, "testdb")
     assert.Contains(t, dsn, "charset=utf8mb4")

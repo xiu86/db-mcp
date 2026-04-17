@@ -11,6 +11,7 @@ import (
 
 	"db-mcp/internal/config"
 	"db-mcp/internal/errors"
+	"db-mcp/internal/sanitizer"
 	"db-mcp/pkg/logger"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -18,7 +19,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// MongoDriver MongoDB驱动实现
+// MongoDriver implements the MongoDB driver
 type MongoDriver struct {
 	client   *mongo.Client
 	database *mongo.Database
@@ -26,7 +27,7 @@ type MongoDriver struct {
 	logger   *logger.Logger
 }
 
-// NewMongoDriver 创建MongoDB驱动
+// NewMongoDriver creates a new MongoDB driver
 func NewMongoDriver(cfg *config.MongoConfig, log *logger.Logger) (*MongoDriver, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -78,44 +79,47 @@ func NewMongoDriver(cfg *config.MongoConfig, log *logger.Logger) (*MongoDriver, 
 	}, nil
 }
 
-// Ping 检查连接
+// Ping checks the connection
 func (d *MongoDriver) Ping(ctx context.Context) error {
 	return d.client.Ping(ctx, nil)
 }
 
-// Close 关闭连接
+// Close closes the connection
 func (d *MongoDriver) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return d.client.Disconnect(ctx)
 }
 
-// DriverType 获取驱动类型
+// DriverType returns the driver type
 func (d *MongoDriver) DriverType() DriverType {
 	return DriverMongoDB
 }
 
-// CurrentDatabase 获取当前数据库
+// CurrentDatabase returns the current database
 func (d *MongoDriver) CurrentDatabase() string {
 	return d.config.Database
 }
 
-// UseDatabase 切换数据库
+// UseDatabase switches to the specified database
 func (d *MongoDriver) UseDatabase(database string) error {
 	if database == "" {
 		return errors.NewError(errors.ErrInvalidInput, "database name cannot be empty", nil)
+	}
+	if err := sanitizer.ValidateTableName(database); err != nil {
+		return errors.NewError(errors.ErrInvalidInput, "invalid database name", err)
 	}
 	d.database = d.client.Database(database)
 	d.config.Database = database
 	return nil
 }
 
-// convertWhere 将统一where条件转换为MongoDB filter
+// convertWhere converts unified where conditions to MongoDB filter
 func convertWhere(where map[string]interface{}) bson.M {
 	filter := bson.M{}
 
 	for key, value := range where {
-		// 处理操作符
+		// Handle operators
 		if m, ok := value.(map[string]interface{}); ok {
 			for op, v := range m {
 				switch op {
@@ -141,7 +145,7 @@ func convertWhere(where map[string]interface{}) bson.M {
 						filter[key] = bson.M{"$gte": arr[0], "$lte": arr[1]}
 					}
 				default:
-					// 未知操作符，直接使用
+					// Unknown operator, use directly
 					filter[key] = v
 				}
 			}
@@ -153,7 +157,7 @@ func convertWhere(where map[string]interface{}) bson.M {
 	return filter
 }
 
-// convertOrder 将OrderBy转换为MongoDB sort
+// convertOrder converts OrderBy to MongoDB sort
 func convertOrder(order []OrderBy) bson.D {
 	if len(order) == 0 {
 		return nil
@@ -170,7 +174,7 @@ func convertOrder(order []OrderBy) bson.D {
 	return sort
 }
 
-// convertFields 将fields转换为MongoDB projection
+// convertFields converts fields to MongoDB projection
 func convertFields(fields []string) bson.M {
 	if len(fields) == 0 {
 		return nil
@@ -183,8 +187,11 @@ func convertFields(fields []string) bson.M {
 	return projection
 }
 
-// Query 查询数据
+// Query executes a find query
 func (d *MongoDriver) Query(ctx context.Context, req *QueryRequest) (*QueryResult, error) {
+	if err := sanitizer.ValidateTableName(req.Table); err != nil {
+		return nil, errors.NewError(errors.ErrInvalidInput, "invalid collection name", err)
+	}
 	collection := d.database.Collection(req.Table)
 
 	filter := convertWhere(req.Where)
@@ -226,8 +233,11 @@ func (d *MongoDriver) Query(ctx context.Context, req *QueryRequest) (*QueryResul
 	}, nil
 }
 
-// Insert 插入数据
+// Insert inserts a document
 func (d *MongoDriver) Insert(ctx context.Context, req *InsertRequest) (*MutationResult, error) {
+	if err := sanitizer.ValidateTableName(req.Table); err != nil {
+		return nil, errors.NewError(errors.ErrInvalidInput, "invalid collection name", err)
+	}
 	collection := d.database.Collection(req.Table)
 
 	_, err := collection.InsertOne(ctx, req.Data)
@@ -242,8 +252,11 @@ func (d *MongoDriver) Insert(ctx context.Context, req *InsertRequest) (*Mutation
 	}, nil
 }
 
-// Update 更新数据
+// Update updates documents
 func (d *MongoDriver) Update(ctx context.Context, req *UpdateRequest) (*MutationResult, error) {
+	if err := sanitizer.ValidateTableName(req.Table); err != nil {
+		return nil, errors.NewError(errors.ErrInvalidInput, "invalid collection name", err)
+	}
 	collection := d.database.Collection(req.Table)
 
 	filter := convertWhere(req.Where)
@@ -260,12 +273,15 @@ func (d *MongoDriver) Update(ctx context.Context, req *UpdateRequest) (*Mutation
 	}, nil
 }
 
-// Delete 删除数据(逻辑删除或物理删除)
+// Delete deletes data (logical or physical delete)
 func (d *MongoDriver) Delete(ctx context.Context, req *DeleteRequest) (*MutationResult, error) {
+	if err := sanitizer.ValidateTableName(req.Table); err != nil {
+		return nil, errors.NewError(errors.ErrInvalidInput, "invalid collection name", err)
+	}
 	collection := d.database.Collection(req.Table)
 	filter := convertWhere(req.Where)
 
-	// 如果有DeleteField，执行逻辑删除
+	// If DeleteField is set, perform logical delete
 	if req.DeleteField != nil && len(req.DeleteField.Fields) > 0 {
 		updates := bson.M{}
 		for _, field := range req.DeleteField.Fields {
@@ -280,7 +296,7 @@ func (d *MongoDriver) Delete(ctx context.Context, req *DeleteRequest) (*Mutation
 			Message:      "Delete successful",
 		}, nil
 	} else {
-		// 物理删除
+		// Physical delete
 		result, err := collection.DeleteMany(ctx, filter)
 		if err != nil {
 			return nil, errors.NewError(errors.ErrDatabase, "delete failed", err)
@@ -292,8 +308,11 @@ func (d *MongoDriver) Delete(ctx context.Context, req *DeleteRequest) (*Mutation
 	}
 }
 
-// BatchInsert 批量插入
+// BatchInsert inserts multiple documents
 func (d *MongoDriver) BatchInsert(ctx context.Context, req *BatchInsertRequest) (*BatchResult, error) {
+	if err := sanitizer.ValidateTableName(req.Table); err != nil {
+		return nil, errors.NewError(errors.ErrInvalidInput, "invalid collection name", err)
+	}
 	if len(req.Data) == 0 {
 		return &BatchResult{
 			SuccessCount: 0,
@@ -311,7 +330,7 @@ func (d *MongoDriver) BatchInsert(ctx context.Context, req *BatchInsertRequest) 
 
 	result, err := collection.InsertMany(ctx, docs)
 	if err != nil {
-		// 如果批量插入失败，尝试逐个插入
+		// If batch insert fails, try inserting one by one
 		return d.batchInsertOneByOne(ctx, collection, req.Data)
 	}
 
@@ -321,7 +340,7 @@ func (d *MongoDriver) BatchInsert(ctx context.Context, req *BatchInsertRequest) 
 	}, nil
 }
 
-// batchInsertOneByOne 逐个插入(当批量插入失败时)
+// batchInsertOneByOne inserts documents one by one (when batch insert fails)
 func (d *MongoDriver) batchInsertOneByOne(ctx context.Context, collection *mongo.Collection, data []map[string]interface{}) (*BatchResult, error) {
 	var successCount, failedCount int64
 	var batchErrors []BatchError
@@ -343,8 +362,11 @@ func (d *MongoDriver) batchInsertOneByOne(ctx context.Context, collection *mongo
 	}, nil
 }
 
-// BatchUpdate 批量更新
+// BatchUpdate updates multiple documents
 func (d *MongoDriver) BatchUpdate(ctx context.Context, req *BatchUpdateRequest) (*BatchResult, error) {
+	if err := sanitizer.ValidateTableName(req.Table); err != nil {
+		return nil, errors.NewError(errors.ErrInvalidInput, "invalid collection name", err)
+	}
 	collection := d.database.Collection(req.Table)
 
 	keyField := req.KeyField
@@ -383,8 +405,11 @@ func (d *MongoDriver) BatchUpdate(ctx context.Context, req *BatchUpdateRequest) 
 	}, nil
 }
 
-// BatchDelete 批量删除
+// BatchDelete deletes multiple documents
 func (d *MongoDriver) BatchDelete(ctx context.Context, req *BatchDeleteRequest) (*BatchResult, error) {
+	if err := sanitizer.ValidateTableName(req.Table); err != nil {
+		return nil, errors.NewError(errors.ErrInvalidInput, "invalid collection name", err)
+	}
 	collection := d.database.Collection(req.Table)
 
 	idField := req.IDField
@@ -400,14 +425,14 @@ func (d *MongoDriver) BatchDelete(ctx context.Context, req *BatchDeleteRequest) 
 
 		var err error
 		if req.DeleteField != nil && len(req.DeleteField.Fields) > 0 {
-			// 逻辑删除
+			// Logical delete
 			updates := bson.M{}
 			for _, field := range req.DeleteField.Fields {
 				updates[field.Name] = field.TrueValue
 			}
 			_, err = collection.UpdateOne(ctx, filter, bson.M{"$set": updates})
 		} else {
-			// 物理删除
+			// Physical delete
 			_, err = collection.DeleteOne(ctx, filter)
 		}
 
@@ -426,7 +451,7 @@ func (d *MongoDriver) BatchDelete(ctx context.Context, req *BatchDeleteRequest) 
 	}, nil
 }
 
-// JoinQuery MongoDB不支持原生Join，使用Aggregation $lookup
+// JoinQuery MongoDB does not support native Join, uses Aggregation $lookup
 func (d *MongoDriver) JoinQuery(ctx context.Context, req *JoinRequest) (*QueryResult, error) {
 	if len(req.Tables) < 2 {
 		return nil, errors.NewError(errors.ErrInvalidInput, "at least 2 collections required for join", nil)
@@ -435,7 +460,15 @@ func (d *MongoDriver) JoinQuery(ctx context.Context, req *JoinRequest) (*QueryRe
 		return nil, errors.NewError(errors.ErrInvalidInput, "join exceeds maximum of 5 collections", nil)
 	}
 
-	// MongoDB使用Aggregation Pipeline模拟Join
+	// Validate all collection names
+	for i, tbl := range req.Tables {
+		if err := sanitizer.ValidateTableName(tbl.Name); err != nil {
+			return nil, errors.NewError(errors.ErrInvalidInput,
+				fmt.Sprintf("invalid collection name at index %d: %s", i, tbl.Name), err)
+		}
+	}
+
+	// MongoDB uses Aggregation Pipeline to simulate Join
 	pipeline := mongo.Pipeline{}
 
 	// $lookup for each join
@@ -499,11 +532,14 @@ func (d *MongoDriver) JoinQuery(ctx context.Context, req *JoinRequest) (*QueryRe
 	}, nil
 }
 
-// GetTableSchema MongoDB的表结构获取(返回集合信息)
+// GetTableSchema gets MongoDB collection schema (returns collection info)
 func (d *MongoDriver) GetTableSchema(collectionName string) (*TableSchema, error) {
+	if err := sanitizer.ValidateTableName(collectionName); err != nil {
+		return nil, errors.NewError(errors.ErrInvalidInput, "invalid collection name", err)
+	}
 	ctx := context.Background()
 
-	// 获取集合的索引信息作为schema
+	// Get collection index info as schema
 	indexes, err := d.database.Collection(collectionName).Indexes().List(ctx)
 	if err != nil {
 		return nil, errors.NewError(errors.ErrDatabase, "failed to get collection indexes", err)
@@ -512,7 +548,7 @@ func (d *MongoDriver) GetTableSchema(collectionName string) (*TableSchema, error
 
 	var columns []ColumnInfo
 
-	// MongoDB是schema-less的，我们返回索引信息作为表的"schema"
+	// MongoDB is schema-less, we return index info as table "schema"
 	for indexes.Next(ctx) {
 		var index bson.M
 		if err := indexes.Decode(&index); err == nil {
@@ -531,7 +567,7 @@ func (d *MongoDriver) GetTableSchema(collectionName string) (*TableSchema, error
 		}
 	}
 
-	// 添加_id字段
+	// Add _id field
 	columns = append([]ColumnInfo{{
 		Name:       "_id",
 		DataType:   "ObjectId",

@@ -262,26 +262,6 @@ func TestColumnInfo(t *testing.T) {
 	assert.Equal(t, "是否删除：0.否，1.是", col.Comment)
 }
 
-func TestJoinFields(t *testing.T) {
-	testCases := []struct {
-		name     string
-		fields   []string
-		expected string
-	}{
-		{"single field", []string{"id"}, "id"},
-		{"two fields", []string{"id", "name"}, "id, name"},
-		{"three fields", []string{"id", "name", "email"}, "id, name, email"},
-		{"empty", []string{}, ""},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := joinFields(tc.fields)
-			assert.Equal(t, tc.expected, got)
-		})
-	}
-}
-
 func TestTableRef(t *testing.T) {
 	ref := TableRef{
 		Name:  "users",

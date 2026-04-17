@@ -12,14 +12,14 @@ import (
 
 type Config struct {
     Databases []InstanceConfig       `yaml:"databases" json:"databases"`
-    Default   string                 `yaml:"default" json:"default"`       // 默认实例名
+    Default   string                 `yaml:"default" json:"default"`       // Default instance name
     MCP       MCPConfig              `yaml:"mcp" json:"mcp"`
     Log       LogConfig              `yaml:"log" json:"log"`
     RateLimit RateLimitConfig        `yaml:"rateLimit" json:"rateLimit"`
     Pool      PoolConfig             `yaml:"pool" json:"pool"`
     Timeout   TimeoutConfigLoadable  `yaml:"timeout" json:"timeout"`
 
-    // 向后兼容字段
+    // Backward compatibility field
     Database *DatabaseConfig `yaml:"database,omitempty" json:"database,omitempty"`
     Mongo    *MongoConfig    `yaml:"mongo,omitempty" json:"mongo,omitempty"`
 }
@@ -33,14 +33,14 @@ type TimeoutConfigLoadable struct {
 
 type InstanceConfig struct {
     Type     string `yaml:"type" json:"type"`           // "mysql" | "mongodb"
-    Name     string `yaml:"name" json:"name"`           // 实例名称
+    Name     string `yaml:"name" json:"name"`           // Instance name
     Host     string `yaml:"host" json:"host"`
     Port     int    `yaml:"port" json:"port"`
     User     string `yaml:"user" json:"user"`
     Password string `yaml:"password" json:"password"`
     Database string `yaml:"database" json:"database"`
     Charset  string `yaml:"charset" json:"charset"`
-    // MongoDB专用
+    // MongoDB specific
     URI         string `yaml:"uri" json:"uri"`
     MaxPoolSize uint64 `yaml:"maxPoolSize" json:"maxPoolSize"`
     MinPoolSize uint64 `yaml:"minPoolSize" json:"minPoolSize"`
@@ -163,7 +163,7 @@ func Load(configPath string) (*Config, error) {
         }
     }
 
-    // 向后兼容：如果使用旧的database字段，转换为databases
+    // Backward compatibility: convert old 'database' field to 'databases'
     if cfg.Database != nil {
         // Check if the databases array only has default values (from DefaultConfig)
         hasOnlyDefaults := len(cfg.Databases) == 1 &&
@@ -189,7 +189,7 @@ func Load(configPath string) (*Config, error) {
         }
     }
 
-    // 向后兼容：如果使用旧的mongo字段，转换为databases
+    // Backward compatibility: convert old 'mongo' field to 'databases'
     if cfg.Mongo != nil {
         mongoInstance := InstanceConfig{
             Type:        "mongodb",
@@ -204,9 +204,9 @@ func Load(configPath string) (*Config, error) {
         cfg.Default = "mongo"
     }
 
-    // 环境变量覆盖 - 支持单实例(向后兼容)和多实例
+    // Environment variable override - supports single instance (backward compatibility) and multi-instance
     if instances := os.Getenv("DB_INSTANCES"); instances != "" {
-        // 多实例模式：DB_INSTANCES=primary,secondary
+        // Multi-instance mode: DB_INSTANCES=primary,secondary
         // Clear default databases and use only those from env
         cfg.Databases = []InstanceConfig{}
         instanceNames := parseInstances(instances)
@@ -221,7 +221,7 @@ func Load(configPath string) (*Config, error) {
             cfg.Default = ""
         }
     } else {
-        // 单实例模式(向后兼容)
+        // Single instance mode (backward compatibility)
         if len(cfg.Databases) > 0 {
             if v := os.Getenv("DB_HOST"); v != "" {
                 cfg.Databases[0].Host = v
@@ -243,12 +243,12 @@ func Load(configPath string) (*Config, error) {
         }
     }
 
-    // 至少需要一个数据库实例
+    // At least one database instance is required
     if len(cfg.Databases) == 0 {
         return nil, fmt.Errorf("at least one database instance is required")
     }
 
-    // 默认实例校验
+    // Default instance validation
     if cfg.Default == "" || !instanceExists(cfg.Databases, cfg.Default) {
         // Default to first instance if none specified or doesn't exist
         cfg.Default = cfg.Databases[0].Name
@@ -358,13 +358,13 @@ func instanceExists(instances []InstanceConfig, name string) bool {
 func LoadFromMCP(params map[string]interface{}) *Config {
     cfg := DefaultConfig()
 
-    // 支持instance参数指定目标实例
+    // Support 'instance' parameter to specify target instance
     instanceName := "default"
     if v, ok := params["instance"].(string); ok {
         instanceName = v
     }
 
-    // 查找或创建指定实例
+    // Find or create the specified instance
     var instance *InstanceConfig
     for i, inst := range cfg.Databases {
         if inst.Name == instanceName {
@@ -374,7 +374,7 @@ func LoadFromMCP(params map[string]interface{}) *Config {
     }
 
     if instance == nil {
-        // 创建新实例，替换默认实例
+        // Create new instance, replace default instance
         cfg.Databases = []InstanceConfig{{
             Type: "mysql",
             Name: instanceName,
@@ -384,7 +384,7 @@ func LoadFromMCP(params map[string]interface{}) *Config {
         instance = &cfg.Databases[0]
     }
 
-    // 从参数更新实例配置
+    // Update instance config from parameters
     if v, ok := params["type"].(string); ok {
         instance.Type = v
     }
@@ -416,7 +416,7 @@ func LoadFromMCP(params map[string]interface{}) *Config {
         instance.MinPoolSize = uint64(v)
     }
 
-    // 更新默认实例
+    // Update default instance
     if instanceName != "" {
         cfg.Default = instanceName
     }

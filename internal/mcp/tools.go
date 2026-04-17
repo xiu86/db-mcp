@@ -37,7 +37,7 @@ type MCPServer struct {
 	timeout     *middleware.TimeoutConfig
 }
 
-func NewMCPServer(cm *connection.ConnectionManager, cfg *config.Config, log *logger.Logger) *MCPServer {
+func NewMCPServer(cm *connection.ConnectionManager, cfg *config.Config, log *logger.Logger) (*MCPServer, error) {
 	s := server.NewMCPServer(
 		"db-mcp",
 		"1.0.0",
@@ -49,7 +49,7 @@ func NewMCPServer(cm *connection.ConnectionManager, cfg *config.Config, log *log
 	if cm != nil {
 		driver, err := cm.GetDriver(cm.CurrentInstance())
 		if err != nil {
-			panic(fmt.Sprintf("failed to get driver: %v", err))
+			return nil, fmt.Errorf("failed to get driver: %w", err)
 		}
 		repo := repository.New(driver)
 		auditSvc := service.NewAuditServiceWithDB(cfg.Log.AuditFile, cm.DB())
@@ -83,7 +83,7 @@ func NewMCPServer(cm *connection.ConnectionManager, cfg *config.Config, log *log
 	}
 
 	mcpServer.registerTools()
-	return mcpServer
+	return mcpServer, nil
 }
 
 func (s *MCPServer) checkRateLimit() error {
@@ -517,7 +517,7 @@ func (s *MCPServer) handleSwitch(ctx context.Context, request mcp.CallToolReques
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	return mcp.NewToolResultText(fmt.Sprintf(`{"status":"switched","instance":"%s"}`, instance)), nil
+	return mcp.NewToolResultText(toJSON(map[string]string{"status": "switched", "instance": instance})), nil
 }
 
 func (s *MCPServer) handleListInstances(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {

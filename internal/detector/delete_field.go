@@ -110,7 +110,7 @@ func (d *DeleteFieldDetector) detectDeleteFields(columns []ColumnInfo) []Field {
 }
 
 func (d *DeleteFieldDetector) analyzeColumn(col ColumnInfo) *Field {
-	// 1. 字段名匹配检测
+	// 1. Field name pattern detection
 	for _, pattern := range namePatterns {
 		if strings.EqualFold(col.Name, pattern) {
 			return &Field{
@@ -121,7 +121,7 @@ func (d *DeleteFieldDetector) analyzeColumn(col ColumnInfo) *Field {
 		}
 	}
 
-	// 2. COMMENT 语义检测
+	// 2. COMMENT semantic detection
 	if ContainsDeleteKeyword(col.Comment) {
 		trueValue := typeBasedValues[col.DataType]
 		return &Field{
@@ -131,7 +131,7 @@ func (d *DeleteFieldDetector) analyzeColumn(col ColumnInfo) *Field {
 		}
 	}
 
-	// 3. COMMENT 值映射检测
+	// 3. COMMENT value mapping detection
 	if mappedValue := ExtractDeleteValue(col.Comment, col.DataType); mappedValue != "" {
 		return &Field{
 			Name:      col.Name,

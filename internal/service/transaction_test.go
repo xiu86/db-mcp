@@ -45,14 +45,14 @@ func getTestDBPassword() string {
 	if v := os.Getenv("TEST_DB_PASSWORD"); v != "" {
 		return v
 	}
-	return "123456"
+	return ""
 }
 
 func getTestDBName() string {
 	if v := os.Getenv("TEST_DB_NAME"); v != "" {
 		return v
 	}
-	return "video-core_gzminjieadmin_test"
+	return "test_db"
 }
 
 func getTestConfig() *config.Config {
@@ -443,22 +443,5 @@ func TestTransactionContext_Delete(t *testing.T) {
 
 		err := txCtx.Delete("tx_test_users", map[string]interface{}{"id": 1})
 		assert.Error(t, err)
-	})
-}
-
-func TestJoinFields(t *testing.T) {
-	t.Run("single field", func(t *testing.T) {
-		result := joinFields([]string{"id"})
-		assert.Equal(t, "id", result)
-	})
-
-	t.Run("multiple fields", func(t *testing.T) {
-		result := joinFields([]string{"id", "name", "email"})
-		assert.Equal(t, "id, name, email", result)
-	})
-
-	t.Run("empty fields", func(t *testing.T) {
-		result := joinFields([]string{})
-		assert.Equal(t, "", result)
 	})
 }

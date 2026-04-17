@@ -1,0 +1,28 @@
+# Compiled binaries
+bin/
+/server
+*.exe
+*.test
+
+# Config with real credentials
+config.yaml
+
+# Logs
+logs/
+
+# Coverage
+coverage*.out
+*.out
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Claude local settings
+.claude/settings.local.json
