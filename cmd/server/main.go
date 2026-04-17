@@ -15,7 +15,6 @@ import (
 	"db-mcp/pkg/logger"
 
 	"github.com/mark3labs/mcp-go/server"
-	"gorm.io/gorm"
 )
 
 var (
@@ -54,7 +53,7 @@ func main() {
 	log.Info("Database connection established")
 
 	// Create MCP server (this also initializes the audit service)
-	mcpSvc := mcpserver.NewMCPServer(connManager.DB(), cfg, log)
+	mcpSvc := mcpserver.NewMCPServer(connManager, cfg, log)
 
 	// Start server
 	srv := mcpSvc.GetServer()
@@ -96,7 +95,7 @@ func main() {
 }
 
 // HTTPHandler returns an HTTP handler for the MCP server (optional)
-func HTTPHandler(db *gorm.DB, cfg *config.Config, log *logger.Logger) http.Handler {
-	_ = mcpserver.NewMCPServer(db, cfg, log) // MCP server for HTTP transport
+func HTTPHandler(cm *connection.ConnectionManager, cfg *config.Config, log *logger.Logger) http.Handler {
+	_ = mcpserver.NewMCPServer(cm, cfg, log) // MCP server for HTTP transport
 	return nil                                // SSE handler would be implemented here
 }

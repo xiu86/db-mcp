@@ -16,6 +16,7 @@ const (
 	ErrTimeout        ErrorCode = "TIMEOUT"
 	ErrRateLimit      ErrorCode = "RATE_LIMIT_EXCEEDED"
 	ErrInternal       ErrorCode = "INTERNAL_ERROR"
+	ErrDatabase       ErrorCode = "DATABASE_ERROR"
 )
 
 type DBError struct {

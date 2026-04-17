@@ -1,507 +1,113 @@
 package repository
 
 import (
-    "db-mcp/internal/detector"
-    "db-mcp/internal/errors"
-    "db-mcp/internal/sanitizer"
-    "fmt"
-
-    "gorm.io/gorm"
+	"context"
+	"db-mcp/internal/driver"
 )
 
+// Repository 持有驱动并实现 DatabaseDriver
 type Repository struct {
-    db *gorm.DB
+	driver driver.DatabaseDriver
 }
 
-type QueryRequest struct {
-    Table  string
-    Fields []string
-    Where  map[string]interface{}
-    Order  []OrderBy
-    Limit  int
-    Offset int
+// New 创建 Repository 实例
+func New(d driver.DatabaseDriver) *Repository {
+	return &Repository{driver: d}
 }
 
-type OrderBy struct {
-    Field     string
-    Direction string
+// 确保 Repository 实现了 DatabaseDriver
+var _ driver.DatabaseDriver = (*Repository)(nil)
+
+// Ping 委托给驱动
+func (r *Repository) Ping(ctx context.Context) error {
+	return r.driver.Ping(ctx)
 }
 
-type InsertRequest struct {
-    Table string
-    Data  map[string]interface{}
+// Close 委托给驱动
+func (r *Repository) Close() error {
+	return r.driver.Close()
 }
 
-type UpdateRequest struct {
-    Table string
-    Data  map[string]interface{}
-    Where map[string]interface{}
+// DriverType 委托给驱动
+func (r *Repository) DriverType() driver.DriverType {
+	return r.driver.DriverType()
 }
 
-type DeleteRequest struct {
-    Table       string
-    Where       map[string]interface{}
-    DeleteField *detector.DeleteFieldInfo
+// CurrentDatabase 委托给驱动
+func (r *Repository) CurrentDatabase() string {
+	return r.driver.CurrentDatabase()
 }
 
-type BatchInsertRequest struct {
-    Table string
-    Data  []map[string]interface{}
+// UseDatabase 委托给驱动
+func (r *Repository) UseDatabase(database string) error {
+	return r.driver.UseDatabase(database)
 }
 
-type BatchUpdateRequest struct {
-    Table    string
-    Data     []map[string]interface{}
-    KeyField string
+// Query 委托给驱动
+func (r *Repository) Query(ctx context.Context, req *driver.QueryRequest) (*driver.QueryResult, error) {
+	return r.driver.Query(ctx, req)
 }
 
-type BatchDeleteRequest struct {
-    Table       string
-    IDs         []string
-    IDField     string
-    DeleteField *detector.DeleteFieldInfo
+// Insert 委托给驱动
+func (r *Repository) Insert(ctx context.Context, req *driver.InsertRequest) (*driver.MutationResult, error) {
+	return r.driver.Insert(ctx, req)
 }
 
-type JoinRequest struct {
-    Tables []TableRef
-    Joins  []JoinClause
-    Fields []string
-    Where  map[string]interface{}
-    Order  []OrderBy
-    Limit  int
+// Update 委托给驱动
+func (r *Repository) Update(ctx context.Context, req *driver.UpdateRequest) (*driver.MutationResult, error) {
+	return r.driver.Update(ctx, req)
 }
 
-type TableRef struct {
-    Name  string
-    Alias string
+// Delete 委托给驱动
+func (r *Repository) Delete(ctx context.Context, req *driver.DeleteRequest) (*driver.MutationResult, error) {
+	return r.driver.Delete(ctx, req)
 }
 
-type JoinClause struct {
-    Type      string
-    FromTable string
-    FromField string
-    ToTable   string
-    ToField   string
+// BatchInsert 委托给驱动
+func (r *Repository) BatchInsert(ctx context.Context, req *driver.BatchInsertRequest) (*driver.BatchResult, error) {
+	return r.driver.BatchInsert(ctx, req)
 }
 
-type QueryResult struct {
-    Rows    []map[string]interface{}
-    Total   int64
-    Message string
+// BatchUpdate 委托给驱动
+func (r *Repository) BatchUpdate(ctx context.Context, req *driver.BatchUpdateRequest) (*driver.BatchResult, error) {
+	return r.driver.BatchUpdate(ctx, req)
 }
 
-type MutationResult struct {
-    AffectedRows int64
-    LastInsertID int64
-    Message      string
+// BatchDelete 委托给驱动
+func (r *Repository) BatchDelete(ctx context.Context, req *driver.BatchDeleteRequest) (*driver.BatchResult, error) {
+	return r.driver.BatchDelete(ctx, req)
 }
 
-type BatchResult struct {
-    SuccessCount int64
-    FailedCount  int64
-    Errors       []BatchError
+// JoinQuery 委托给驱动
+func (r *Repository) JoinQuery(ctx context.Context, req *driver.JoinRequest) (*driver.QueryResult, error) {
+	return r.driver.JoinQuery(ctx, req)
 }
 
-type BatchError struct {
-    Index   int
-    Message string
+// GetTableSchema 委托给驱动
+func (r *Repository) GetTableSchema(tableName string) (*driver.TableSchema, error) {
+	return r.driver.GetTableSchema(tableName)
 }
 
-// TableSchema 用于描述表结构
-type TableSchema struct {
-    TableName string
-    Columns   []ColumnInfo
+// 旧接口方法(向后兼容) - 使用 context.Background()
+
+// LogicalDelete 逻辑删除(旧接口)
+func (r *Repository) LogicalDelete(req *DeleteRequest) (*driver.MutationResult, error) {
+	return r.driver.Delete(context.Background(), req)
 }
 
-// ColumnInfo 用于描述列信息
-type ColumnInfo struct {
-    Name         string
-    DataType     string
-    IsNullable   string
-    ColumnKey    string
-    Extra        string
-    ColumnDefault *string
-    Comment      string
+// BatchLogicalDelete 批量逻辑删除(旧接口)
+func (r *Repository) BatchLogicalDelete(req *driver.BatchDeleteRequest) (*driver.BatchResult, error) {
+	return r.driver.BatchDelete(context.Background(), req)
 }
 
-func New(db *gorm.DB) *Repository {
-    return &Repository{db: db}
-}
-
-func (r *Repository) Query(req *QueryRequest) (*QueryResult, error) {
-    if err := sanitizer.ValidateTableName(req.Table); err != nil {
-        return nil, err
-    }
-
-    var rows []map[string]interface{}
-
-    query := r.db.Table(req.Table)
-
-    if len(req.Where) > 0 {
-        query = query.Where(req.Where)
-    }
-
-    for _, order := range req.Order {
-        safeOrder, err := sanitizer.SanitizeOrderField(order.Field, order.Direction)
-        if err != nil {
-            return nil, err
-        }
-        query = query.Order(safeOrder)
-    }
-
-    if req.Limit > 0 {
-        query = query.Limit(req.Limit)
-    }
-    if req.Offset > 0 {
-        query = query.Offset(req.Offset)
-    }
-
-    fields := "*"
-    if len(req.Fields) > 0 {
-        if err := sanitizer.ValidateFieldList(req.Fields); err != nil {
-            return nil, err
-        }
-        fields = sanitizer.QuoteFieldList(req.Fields)
-    }
-
-    err := query.Select(fields).Find(&rows).Error
-    if err != nil {
-        return nil, errors.WrapGormError(err)
-    }
-
-    var total int64
-    r.db.Table(req.Table).Where(req.Where).Count(&total)
-
-    return &QueryResult{Rows: rows, Total: total}, nil
-}
-
-func (r *Repository) Insert(req *InsertRequest) (*MutationResult, error) {
-    if err := sanitizer.ValidateTableName(req.Table); err != nil {
-        return nil, err
-    }
-
-    err := r.db.Table(req.Table).Create(req.Data).Error
-    if err != nil {
-        return nil, errors.WrapGormError(err)
-    }
-
-    return &MutationResult{
-        AffectedRows: 1,
-        LastInsertID: 1,
-        Message:      "Insert successful",
-    }, nil
-}
-
-func (r *Repository) Update(req *UpdateRequest) (*MutationResult, error) {
-    if err := sanitizer.ValidateTableName(req.Table); err != nil {
-        return nil, err
-    }
-
-    result := r.db.Table(req.Table).Where(req.Where).Updates(req.Data)
-    if result.Error != nil {
-        return nil, errors.WrapGormError(result.Error)
-    }
-
-    return &MutationResult{
-        AffectedRows: result.RowsAffected,
-        Message:      "Update successful",
-    }, nil
-}
-
-func (r *Repository) LogicalDelete(req *DeleteRequest) (*MutationResult, error) {
-    if err := sanitizer.ValidateTableName(req.Table); err != nil {
-        return nil, err
-    }
-    if req.DeleteField == nil || len(req.DeleteField.Fields) == 0 {
-        return nil, errors.NewError(errors.ErrInvalidInput, "no delete field detected", nil)
-    }
-
-    updates := make(map[string]interface{})
-    for _, field := range req.DeleteField.Fields {
-        if field.TrueValue == detector.CurrentTimestampMarker {
-            updates[field.Name] = detector.GetCurrentTimestamp()
-        } else {
-            updates[field.Name] = field.TrueValue
-        }
-    }
-
-    result := r.db.Table(req.Table).Where(req.Where).Updates(updates)
-    if result.Error != nil {
-        return nil, errors.WrapGormError(result.Error)
-    }
-
-    return &MutationResult{
-        AffectedRows: result.RowsAffected,
-        Message:      "Logical delete successful",
-    }, nil
-}
-
-func (r *Repository) BatchInsert(req *BatchInsertRequest) (*BatchResult, error) {
-    if err := sanitizer.ValidateTableName(req.Table); err != nil {
-        return nil, err
-    }
-
-    var successCount, failedCount int64
-    var batchErrors []BatchError
-
-    for i, data := range req.Data {
-        err := r.db.Table(req.Table).Create(data).Error
-        if err != nil {
-            failedCount++
-            batchErrors = append(batchErrors, BatchError{Index: i, Message: err.Error()})
-        } else {
-            successCount++
-        }
-    }
-
-    return &BatchResult{
-        SuccessCount: successCount,
-        FailedCount:  failedCount,
-        Errors:       batchErrors,
-    }, nil
-}
-
-func (r *Repository) BatchUpdate(req *BatchUpdateRequest) (*BatchResult, error) {
-    if err := sanitizer.ValidateTableName(req.Table); err != nil {
-        return nil, err
-    }
-
-    var successCount, failedCount int64
-    var batchErrors []BatchError
-
-    keyField := req.KeyField
-    if keyField == "" {
-        keyField = "id"
-    }
-
-    if err := sanitizer.ValidateFieldName(keyField); err != nil {
-        return nil, errors.NewError(errors.ErrInvalidInput,
-            fmt.Sprintf("invalid key field: %s", keyField), err)
-    }
-    safeKeyField := sanitizer.QuoteIdentifier(keyField)
-
-    for i, data := range req.Data {
-        keyValue := data[keyField]
-        if keyValue == nil {
-            failedCount++
-            batchErrors = append(batchErrors, BatchError{Index: i, Message: "key field value is nil"})
-            continue
-        }
-
-        delete(data, keyField)
-        result := r.db.Table(req.Table).Where(safeKeyField+" = ?", keyValue).Updates(data)
-        if result.Error != nil {
-            failedCount++
-            batchErrors = append(batchErrors, BatchError{Index: i, Message: result.Error.Error()})
-        } else {
-            successCount++
-        }
-    }
-
-    return &BatchResult{
-        SuccessCount: successCount,
-        FailedCount:  failedCount,
-        Errors:       batchErrors,
-    }, nil
-}
-
-func (r *Repository) BatchLogicalDelete(req *BatchDeleteRequest) (*BatchResult, error) {
-    if err := sanitizer.ValidateTableName(req.Table); err != nil {
-        return nil, err
-    }
-    if req.DeleteField == nil || len(req.DeleteField.Fields) == 0 {
-        return nil, errors.NewError(errors.ErrInvalidInput, "no delete field detected", nil)
-    }
-
-    var successCount, failedCount int64
-    var batchErrors []BatchError
-
-    idField := req.IDField
-    if idField == "" {
-        idField = "id"
-    }
-
-    if err := sanitizer.ValidateFieldName(idField); err != nil {
-        return nil, errors.NewError(errors.ErrInvalidInput,
-            fmt.Sprintf("invalid id field: %s", idField), err)
-    }
-    safeIDField := sanitizer.QuoteIdentifier(idField)
-
-    updates := make(map[string]interface{})
-    for _, field := range req.DeleteField.Fields {
-        if field.TrueValue == detector.CurrentTimestampMarker {
-            updates[field.Name] = detector.GetCurrentTimestamp()
-        } else {
-            updates[field.Name] = field.TrueValue
-        }
-    }
-
-    for i, id := range req.IDs {
-        result := r.db.Table(req.Table).Where(safeIDField+" = ?", id).Updates(updates)
-        if result.Error != nil {
-            failedCount++
-            batchErrors = append(batchErrors, BatchError{Index: i, Message: result.Error.Error()})
-        } else {
-            successCount++
-        }
-    }
-
-    return &BatchResult{
-        SuccessCount: successCount,
-        FailedCount:  failedCount,
-        Errors:       batchErrors,
-    }, nil
-}
-
-func (r *Repository) JoinQuery(req *JoinRequest) (*QueryResult, error) {
-    if len(req.Tables) < 2 {
-        return nil, errors.NewError(errors.ErrInvalidInput, "at least 2 tables required for join", nil)
-    }
-    if len(req.Tables) > 5 {
-        return nil, errors.NewError(errors.ErrInvalidInput, "join exceeds maximum of 5 tables", nil)
-    }
-
-    // Validate all table names and aliases
-    for i, tbl := range req.Tables {
-        if err := sanitizer.ValidateTableName(tbl.Name); err != nil {
-            return nil, errors.NewError(errors.ErrInvalidInput,
-                fmt.Sprintf("invalid table name at index %d: %s", i, tbl.Name), err)
-        }
-        if err := sanitizer.ValidateAlias(tbl.Alias); err != nil {
-            return nil, errors.NewError(errors.ErrInvalidInput,
-                fmt.Sprintf("invalid alias at index %d: %s", i, tbl.Alias), err)
-        }
-    }
-
-    table0 := req.Tables[0]
-    query := r.db.Table(
-        sanitizer.QuoteIdentifier(table0.Name) + " AS " + sanitizer.QuoteIdentifier(table0.Alias),
-    )
-
-    for i, join := range req.Joins {
-        if err := sanitizer.ValidateJoinType(join.Type); err != nil {
-            return nil, errors.NewError(errors.ErrInvalidInput,
-                fmt.Sprintf("invalid join type at index %d: %s", i, join.Type), err)
-        }
-        if err := sanitizer.ValidateAlias(join.FromTable); err != nil {
-            return nil, errors.NewError(errors.ErrInvalidInput,
-                fmt.Sprintf("invalid from table alias at join index %d: %s", i, join.FromTable), err)
-        }
-        if err := sanitizer.ValidateColumnName(join.FromField); err != nil {
-            return nil, errors.NewError(errors.ErrInvalidInput,
-                fmt.Sprintf("invalid from field at join index %d: %s", i, join.FromField), err)
-        }
-        if err := sanitizer.ValidateAlias(join.ToTable); err != nil {
-            return nil, errors.NewError(errors.ErrInvalidInput,
-                fmt.Sprintf("invalid to table alias at join index %d: %s", i, join.ToTable), err)
-        }
-        if err := sanitizer.ValidateColumnName(join.ToField); err != nil {
-            return nil, errors.NewError(errors.ErrInvalidInput,
-                fmt.Sprintf("invalid to field at join index %d: %s", i, join.ToField), err)
-        }
-
-        joinType := "INNER JOIN"
-        switch join.Type {
-        case "left":
-            joinType = "LEFT JOIN"
-        case "right":
-            joinType = "RIGHT JOIN"
-        }
-
-        query = query.Joins(fmt.Sprintf("%s %s ON %s.%s = %s.%s",
-            joinType,
-            sanitizer.QuoteIdentifier(join.ToTable),
-            sanitizer.QuoteIdentifier(join.FromTable),
-            sanitizer.QuoteIdentifier(join.FromField),
-            sanitizer.QuoteIdentifier(join.ToTable),
-            sanitizer.QuoteIdentifier(join.ToField),
-        ))
-    }
-
-    if len(req.Where) > 0 {
-        query = query.Where(req.Where)
-    }
-
-    for _, order := range req.Order {
-        safeOrder, err := sanitizer.SanitizeOrderField(order.Field, order.Direction)
-        if err != nil {
-            return nil, err
-        }
-        query = query.Order(safeOrder)
-    }
-
-    if req.Limit > 0 {
-        query = query.Limit(req.Limit)
-    }
-
-    fields := "*"
-    if len(req.Fields) > 0 {
-        if err := sanitizer.ValidateFieldList(req.Fields); err != nil {
-            return nil, err
-        }
-        fields = sanitizer.QuoteFieldList(req.Fields)
-    }
-
-    var rows []map[string]interface{}
-    err := query.Select(fields).Find(&rows).Error
-    if err != nil {
-        return nil, errors.WrapGormError(err)
-    }
-
-    return &QueryResult{Rows: rows, Total: int64(len(rows))}, nil
-}
-
+// joinFields 连接字段列表
 func joinFields(fields []string) string {
-    result := ""
-    for i, f := range fields {
-        if i > 0 {
-            result += ", "
-        }
-        result += f
-    }
-    return result
-}
-
-// GetTableSchema 获取表结构信息
-func (r *Repository) GetTableSchema(tableName string) (*TableSchema, error) {
-	if err := sanitizer.ValidateTableName(tableName); err != nil {
-		return nil, err
+	result := ""
+	for i, f := range fields {
+		if i > 0 {
+			result += ", "
+		}
+		result += f
 	}
-
-	var results []struct {
-		Field          string `gorm:"column:COLUMN_NAME"`
-		Type           string `gorm:"column:DATA_TYPE"`
-		Null           string `gorm:"column:IS_NULLABLE"`
-		Key            string `gorm:"column:COLUMN_KEY"`
-		Default        *string `gorm:"column:COLUMN_DEFAULT"`
-		Extra          string `gorm:"column:EXTRA"`
-		Comment        string `gorm:"column:COLUMN_COMMENT"`
-	}
-
-	err := r.db.Table("information_schema.COLUMNS").
-		Select("COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_KEY, EXTRA, COLUMN_DEFAULT, COLUMN_COMMENT").
-		Where("TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?", tableName).
-		Scan(&results).Error
-
-	if err != nil {
-		return nil, errors.WrapGormError(err)
-	}
-
-	var columns []ColumnInfo
-	for _, col := range results {
-		columns = append(columns, ColumnInfo{
-			Name:          col.Field,
-			DataType:      col.Type,
-			IsNullable:    col.Null,
-			ColumnKey:     col.Key,
-			Extra:         col.Extra,
-			ColumnDefault: col.Default,
-			Comment:       col.Comment,
-		})
-	}
-
-	return &TableSchema{
-		TableName: tableName,
-		Columns:   columns,
-	}, nil
+	return result
 }

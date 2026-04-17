@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"db-mcp/internal/config"
+	"db-mcp/internal/connection"
+	"db-mcp/internal/driver"
 	"db-mcp/internal/errors"
 	"db-mcp/internal/middleware"
 	"db-mcp/internal/repository"
@@ -15,30 +17,45 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"gorm.io/gorm"
+)
+
+// Type aliases for driver types to maintain backward compatibility
+type (
+	OrderBy    = driver.OrderBy
+	TableRef   = driver.TableRef
+	JoinClause = driver.JoinClause
 )
 
 type MCPServer struct {
-	server     *server.MCPServer
-	crud       *service.CRUDService
-	txService  *service.TransactionService
-	config     *config.Config
-	logger     *logger.Logger
+	server      *server.MCPServer
+	connManager *connection.ConnectionManager
+	crud        *service.CRUDService
+	txService   *service.TransactionService
+	config      *config.Config
+	logger      *logger.Logger
 	rateLimiter *middleware.RateLimiter
-	timeout    *middleware.TimeoutConfig
+	timeout     *middleware.TimeoutConfig
 }
 
-func NewMCPServer(db *gorm.DB, cfg *config.Config, log *logger.Logger) *MCPServer {
+func NewMCPServer(cm *connection.ConnectionManager, cfg *config.Config, log *logger.Logger) *MCPServer {
 	s := server.NewMCPServer(
 		"db-mcp",
 		"1.0.0",
 		server.WithToolCapabilities(true),
 	)
 
-	repo := repository.New(db)
-	auditSvc := service.NewAuditServiceWithDB(cfg.Log.AuditFile, db)
-	crudSvc := service.NewCRUDService(repo, auditSvc, cfg, log)
-	txSvc := service.NewTransactionService(db, auditSvc, cfg, log)
+	var crudSvc *service.CRUDService
+	var txSvc *service.TransactionService
+	if cm != nil {
+		driver, err := cm.GetDriver(cm.CurrentInstance())
+		if err != nil {
+			panic(fmt.Sprintf("failed to get driver: %v", err))
+		}
+		repo := repository.New(driver)
+		auditSvc := service.NewAuditServiceWithDB(cfg.Log.AuditFile, cm.DB())
+		crudSvc = service.NewCRUDService(repo, auditSvc, cfg, log)
+		txSvc = service.NewTransactionService(cm.DB(), auditSvc, cfg, log)
+	}
 	rateLimiter := middleware.NewRateLimiter(&cfg.RateLimit)
 	timeout := middleware.DefaultTimeoutConfig()
 	if cfg.Timeout.Connect > 0 {
@@ -55,13 +72,14 @@ func NewMCPServer(db *gorm.DB, cfg *config.Config, log *logger.Logger) *MCPServe
 	}
 
 	mcpServer := &MCPServer{
-		server:     s,
-		crud:       crudSvc,
-		txService:  txSvc,
-		config:     cfg,
-		logger:     log,
+		server:      s,
+		connManager: cm,
+		crud:        crudSvc,
+		txService:   txSvc,
+		config:      cfg,
+		logger:      log,
 		rateLimiter: rateLimiter,
-		timeout:    timeout,
+		timeout:     timeout,
 	}
 
 	mcpServer.registerTools()
@@ -116,6 +134,7 @@ func (s *MCPServer) registerTools() {
 	s.server.AddTool(mcp.NewTool("db_query",
 		mcp.WithDescription("Query data from database table"),
 		mcp.WithString("table", mcp.Required(), mcp.Description("Table name to query")),
+		mcp.WithString("instance", mcp.Description("Database instance name (optional, uses current if not specified)")),
 		mcp.WithArray("fields", mcp.Description("Fields to select (default: all)")),
 		mcp.WithObject("where", mcp.Description("Where conditions")),
 		mcp.WithArray("order", mcp.Description("Order by clauses")),
@@ -127,6 +146,7 @@ func (s *MCPServer) registerTools() {
 	s.server.AddTool(mcp.NewTool("db_insert",
 		mcp.WithDescription("Insert data into database table"),
 		mcp.WithString("table", mcp.Required(), mcp.Description("Table name")),
+		mcp.WithString("instance", mcp.Description("Database instance name (optional, uses current if not specified)")),
 		mcp.WithObject("data", mcp.Required(), mcp.Description("Data to insert")),
 	), s.handleInsert)
 
@@ -134,6 +154,7 @@ func (s *MCPServer) registerTools() {
 	s.server.AddTool(mcp.NewTool("db_update",
 		mcp.WithDescription("Update data in database table"),
 		mcp.WithString("table", mcp.Required(), mcp.Description("Table name")),
+		mcp.WithString("instance", mcp.Description("Database instance name (optional, uses current if not specified)")),
 		mcp.WithObject("data", mcp.Required(), mcp.Description("Data to update")),
 		mcp.WithObject("where", mcp.Required(), mcp.Description("Where conditions")),
 	), s.handleUpdate)
@@ -142,6 +163,7 @@ func (s *MCPServer) registerTools() {
 	s.server.AddTool(mcp.NewTool("db_delete",
 		mcp.WithDescription("Logical delete from database table"),
 		mcp.WithString("table", mcp.Required(), mcp.Description("Table name")),
+		mcp.WithString("instance", mcp.Description("Database instance name (optional, uses current if not specified)")),
 		mcp.WithObject("where", mcp.Required(), mcp.Description("Where conditions")),
 	), s.handleDelete)
 
@@ -149,6 +171,7 @@ func (s *MCPServer) registerTools() {
 	s.server.AddTool(mcp.NewTool("db_batch_insert",
 		mcp.WithDescription("Batch insert data into database table"),
 		mcp.WithString("table", mcp.Required(), mcp.Description("Table name")),
+		mcp.WithString("instance", mcp.Description("Database instance name (optional, uses current if not specified)")),
 		mcp.WithArray("data", mcp.Required(), mcp.Description("Array of data to insert")),
 	), s.handleBatchInsert)
 
@@ -156,6 +179,7 @@ func (s *MCPServer) registerTools() {
 	s.server.AddTool(mcp.NewTool("db_batch_update",
 		mcp.WithDescription("Batch update data in database table"),
 		mcp.WithString("table", mcp.Required(), mcp.Description("Table name")),
+		mcp.WithString("instance", mcp.Description("Database instance name (optional, uses current if not specified)")),
 		mcp.WithArray("data", mcp.Required(), mcp.Description("Array of data to update")),
 		mcp.WithString("key_field", mcp.Description("Key field for matching (default: id)")),
 	), s.handleBatchUpdate)
@@ -164,6 +188,7 @@ func (s *MCPServer) registerTools() {
 	s.server.AddTool(mcp.NewTool("db_batch_delete",
 		mcp.WithDescription("Batch logical delete from database table"),
 		mcp.WithString("table", mcp.Required(), mcp.Description("Table name")),
+		mcp.WithString("instance", mcp.Description("Database instance name (optional, uses current if not specified)")),
 		mcp.WithArray("ids", mcp.Required(), mcp.Description("Array of IDs to delete")),
 		mcp.WithString("id_field", mcp.Description("ID field name (default: id)")),
 	), s.handleBatchDelete)
@@ -171,6 +196,7 @@ func (s *MCPServer) registerTools() {
 	// db_join tool
 	s.server.AddTool(mcp.NewTool("db_join",
 		mcp.WithDescription("Perform JOIN query across multiple tables"),
+		mcp.WithString("instance", mcp.Description("Database instance name (optional, uses current if not specified)")),
 		mcp.WithArray("tables", mcp.Required(), mcp.Description("Tables with aliases")),
 		mcp.WithArray("joins", mcp.Required(), mcp.Description("Join clauses")),
 		mcp.WithArray("fields", mcp.Description("Fields to select")),
@@ -181,6 +207,7 @@ func (s *MCPServer) registerTools() {
 	// db_transaction tool
 	s.server.AddTool(mcp.NewTool("db_transaction",
 		mcp.WithDescription("Execute operations in a transaction"),
+		mcp.WithString("instance", mcp.Description("Database instance name (optional, uses current if not specified)")),
 		mcp.WithArray("operations", mcp.Required(), mcp.Description("Array of operations to execute")),
 	), s.handleTransaction)
 
@@ -188,7 +215,19 @@ func (s *MCPServer) registerTools() {
 	s.server.AddTool(mcp.NewTool("db_describe",
 		mcp.WithDescription("Get table schema and detected delete fields"),
 		mcp.WithString("table", mcp.Required(), mcp.Description("Table name to get schema")),
+		mcp.WithString("instance", mcp.Description("Database instance name (optional, uses current if not specified)")),
 	), s.handleSchema)
+
+	// db_switch tool - switch between database instances
+	s.server.AddTool(mcp.NewTool("db_switch",
+		mcp.WithDescription("Switch to a different database instance"),
+		mcp.WithString("instance", mcp.Required(), mcp.Description("Instance name to switch to")),
+	), s.handleSwitch)
+
+	// db_list_instances tool - list all available database instances
+	s.server.AddTool(mcp.NewTool("db_list_instances",
+		mcp.WithDescription("List all available database instances"),
+	), s.handleListInstances)
 }
 
 func getArgs(request mcp.CallToolRequest) map[string]interface{} {
@@ -470,6 +509,27 @@ func (s *MCPServer) handleSchema(ctx context.Context, request mcp.CallToolReques
 	return mcp.NewToolResultText(toJSON(result)), nil
 }
 
+func (s *MCPServer) handleSwitch(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(request)
+	instance, _ := args["instance"].(string)
+
+	if err := s.connManager.SwitchInstance(instance); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return mcp.NewToolResultText(fmt.Sprintf(`{"status":"switched","instance":"%s"}`, instance)), nil
+}
+
+func (s *MCPServer) handleListInstances(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	instances := s.connManager.ListInstances()
+	current := s.connManager.CurrentInstance()
+
+	return mcp.NewToolResultText(toJSON(map[string]interface{}{
+		"instances": instances,
+		"current":    current,
+	})), nil
+}
+
 // Helper types and functions
 
 type Operation struct {
@@ -549,7 +609,7 @@ func toMapSlice(v interface{}) []map[string]interface{} {
 	return result
 }
 
-func toOrderBySlice(v interface{}) []repository.OrderBy {
+func toOrderBySlice(v interface{}) []OrderBy {
 	if v == nil {
 		return nil
 	}
@@ -557,10 +617,10 @@ func toOrderBySlice(v interface{}) []repository.OrderBy {
 	if !ok {
 		return nil
 	}
-	var result []repository.OrderBy
+	var result []OrderBy
 	for _, item := range arr {
 		if m, ok := item.(map[string]interface{}); ok {
-			result = append(result, repository.OrderBy{
+			result = append(result, OrderBy{
 				Field:     toString(m["field"]),
 				Direction: toString(m["direction"]),
 			})
@@ -569,7 +629,7 @@ func toOrderBySlice(v interface{}) []repository.OrderBy {
 	return result
 }
 
-func toTableRefs(v interface{}) []repository.TableRef {
+func toTableRefs(v interface{}) []TableRef {
 	if v == nil {
 		return nil
 	}
@@ -577,10 +637,10 @@ func toTableRefs(v interface{}) []repository.TableRef {
 	if !ok {
 		return nil
 	}
-	var result []repository.TableRef
+	var result []TableRef
 	for _, item := range arr {
 		if m, ok := item.(map[string]interface{}); ok {
-			result = append(result, repository.TableRef{
+			result = append(result, TableRef{
 				Name:  toString(m["name"]),
 				Alias: toString(m["alias"]),
 			})
@@ -589,7 +649,7 @@ func toTableRefs(v interface{}) []repository.TableRef {
 	return result
 }
 
-func toJoinClauses(v interface{}) []repository.JoinClause {
+func toJoinClauses(v interface{}) []JoinClause {
 	if v == nil {
 		return nil
 	}
@@ -597,10 +657,10 @@ func toJoinClauses(v interface{}) []repository.JoinClause {
 	if !ok {
 		return nil
 	}
-	var result []repository.JoinClause
+	var result []JoinClause
 	for _, item := range arr {
 		if m, ok := item.(map[string]interface{}); ok {
-			result = append(result, repository.JoinClause{
+			result = append(result, JoinClause{
 				Type:      toString(m["type"]),
 				FromTable: toString(m["from_table"]),
 				FromField: toString(m["from_field"]),

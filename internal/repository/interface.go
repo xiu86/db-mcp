@@ -1,17 +1,29 @@
 package repository
 
-// RepositoryInterface 定义了数据访问层的接口
-type RepositoryInterface interface {
-	Query(req *QueryRequest) (*QueryResult, error)
-	Insert(req *InsertRequest) (*MutationResult, error)
-	Update(req *UpdateRequest) (*MutationResult, error)
-	LogicalDelete(req *DeleteRequest) (*MutationResult, error)
-	BatchInsert(req *BatchInsertRequest) (*BatchResult, error)
-	BatchUpdate(req *BatchUpdateRequest) (*BatchResult, error)
-	BatchLogicalDelete(req *BatchDeleteRequest) (*BatchResult, error)
-	JoinQuery(req *JoinRequest) (*QueryResult, error)
-	GetTableSchema(tableName string) (*TableSchema, error)
-}
+import (
+	"db-mcp/internal/driver"
+)
 
-// Ensure Repository implements RepositoryInterface
-var _ RepositoryInterface = (*Repository)(nil)
+// RepositoryInterface 是 DatabaseDriver 的别名
+type RepositoryInterface = driver.DatabaseDriver
+
+// 类型别名 - 导出 driver 包的类型供外部使用
+type (
+	QueryRequest       = driver.QueryRequest
+	InsertRequest      = driver.InsertRequest
+	UpdateRequest      = driver.UpdateRequest
+	DeleteRequest      = driver.DeleteRequest
+	BatchInsertRequest = driver.BatchInsertRequest
+	BatchUpdateRequest = driver.BatchUpdateRequest
+	BatchDeleteRequest = driver.BatchDeleteRequest
+	JoinRequest        = driver.JoinRequest
+	OrderBy            = driver.OrderBy
+	QueryResult        = driver.QueryResult
+	MutationResult     = driver.MutationResult
+	BatchResult        = driver.BatchResult
+	BatchError         = driver.BatchError
+	TableSchema        = driver.TableSchema
+	ColumnInfo         = driver.ColumnInfo
+	TableRef           = driver.TableRef
+	JoinClause         = driver.JoinClause
+)

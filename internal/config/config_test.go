@@ -47,12 +47,14 @@ rateLimit:
 	assert.NoError(t, err)
 	assert.NotNil(t, cfg)
 
-	// Verify database config
-	assert.Equal(t, "localhost", cfg.Database.Host)
-	assert.Equal(t, 3306, cfg.Database.Port)
-	assert.Equal(t, "test_user", cfg.Database.User)
-	assert.Equal(t, "test_pass", cfg.Database.Password)
-	assert.Equal(t, "test_db", cfg.Database.Database)
+	// Verify database config (backward compatibility: database field converted to databases)
+	assert.Len(t, cfg.Databases, 1)
+	assert.Equal(t, "localhost", cfg.Databases[0].Host)
+	assert.Equal(t, 3306, cfg.Databases[0].Port)
+	assert.Equal(t, "test_user", cfg.Databases[0].User)
+	assert.Equal(t, "test_pass", cfg.Databases[0].Password)
+	assert.Equal(t, "test_db", cfg.Databases[0].Database)
+	assert.Equal(t, "default", cfg.Default)
 
 	// Verify pool config (from YAML, not default)
 	assert.Equal(t, 5, cfg.Pool.MaxIdleConns)
@@ -71,8 +73,11 @@ rateLimit:
 }
 
 func TestLoad_InvalidPath(t *testing.T) {
-	_, err := Load("/nonexistent/path/config.yaml")
-	assert.Error(t, err)
+	// Non-existent path now returns default config, not an error
+	cfg, err := Load("/nonexistent/path/config.yaml")
+	assert.NoError(t, err)
+	assert.NotNil(t, cfg)
+	assert.Equal(t, "default", cfg.Default)
 }
 
 func TestLoad_InvalidYAML(t *testing.T) {
@@ -97,11 +102,12 @@ func TestLoadFromMCP(t *testing.T) {
 
 	cfg := LoadFromMCP(params)
 
-	assert.Equal(t, "remote-host", cfg.Database.Host)
-	assert.Equal(t, 3307, cfg.Database.Port)
-	assert.Equal(t, "mcp_user", cfg.Database.User)
-	assert.Equal(t, "mcp_pass", cfg.Database.Password)
-	assert.Equal(t, "mcp_db", cfg.Database.Database)
+	assert.Equal(t, "remote-host", cfg.Databases[0].Host)
+	assert.Equal(t, 3307, cfg.Databases[0].Port)
+	assert.Equal(t, "mcp_user", cfg.Databases[0].User)
+	assert.Equal(t, "mcp_pass", cfg.Databases[0].Password)
+	assert.Equal(t, "mcp_db", cfg.Databases[0].Database)
+	assert.Equal(t, "default", cfg.Default)
 }
 
 func TestLoadFromMCP_PartialParams(t *testing.T) {
@@ -111,18 +117,21 @@ func TestLoadFromMCP_PartialParams(t *testing.T) {
 
 	cfg := LoadFromMCP(params)
 
-	assert.Equal(t, "partial-host", cfg.Database.Host)
+	assert.Equal(t, "partial-host", cfg.Databases[0].Host)
 	// Other fields should use defaults
-	assert.Equal(t, 3306, cfg.Database.Port)
+	assert.Equal(t, 3306, cfg.Databases[0].Port)
+	assert.Equal(t, "default", cfg.Default)
 }
 
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
 	assert.NotNil(t, cfg)
-	assert.Equal(t, "localhost", cfg.Database.Host)
-	assert.Equal(t, 3306, cfg.Database.Port)
-	assert.Equal(t, "utf8mb4", cfg.Database.Charset)
+	assert.Len(t, cfg.Databases, 1)
+	assert.Equal(t, "localhost", cfg.Databases[0].Host)
+	assert.Equal(t, 3306, cfg.Databases[0].Port)
+	assert.Equal(t, "utf8mb4", cfg.Databases[0].Charset)
+	assert.Equal(t, "default", cfg.Default)
 
 	assert.Equal(t, 10, cfg.Pool.MaxIdleConns)
 	assert.Equal(t, 100, cfg.Pool.MaxOpenConns)
@@ -166,16 +175,17 @@ database:
 	assert.NoError(t, err)
 
 	// Environment should override config file
-	assert.Equal(t, "env-host", cfg.Database.Host)
-	assert.Equal(t, 3307, cfg.Database.Port)
-	assert.Equal(t, "env_user", cfg.Database.User)
+	assert.Equal(t, "env-host", cfg.Databases[0].Host)
+	assert.Equal(t, 3307, cfg.Databases[0].Port)
+	assert.Equal(t, "env_user", cfg.Databases[0].User)
 }
 
 func TestLoad_MissingRequiredFields(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
-	// Missing user
+	// The new design doesn't validate required fields at config level
+	// Fields are validated at connection time instead
 	configContent := `
 database:
   host: localhost
@@ -187,7 +197,266 @@ database:
 	err := os.WriteFile(configPath, []byte(configContent), 0644)
 	assert.NoError(t, err)
 
-	_, err = Load(configPath)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "required")
+	cfg, err := Load(configPath)
+	assert.NoError(t, err)
+	assert.NotNil(t, cfg)
+
+	// User field is empty but config loads successfully
+	assert.Len(t, cfg.Databases, 1)
+	assert.Equal(t, "", cfg.Databases[0].User)
+	assert.Equal(t, "secret", cfg.Databases[0].Password)
+}
+
+func TestLoad_MultiDatabaseConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	configContent := `
+databases:
+  - type: mysql
+    name: primary
+    host: primary-db
+    port: 3306
+    user: primary_user
+    password: primary_pass
+    database: primary_db
+    charset: utf8mb4
+  - type: mongodb
+    name: mongo
+    uri: mongodb://mongo-server:27017
+    database: mongo_db
+    maxPoolSize: 100
+    minPoolSize: 10
+default: primary
+`
+	err := os.WriteFile(configPath, []byte(configContent), 0644)
+	assert.NoError(t, err)
+
+	cfg, err := Load(configPath)
+	assert.NoError(t, err)
+	assert.Len(t, cfg.Databases, 2)
+	assert.Equal(t, "primary", cfg.Default)
+
+	// Check primary MySQL instance
+	primary := cfg.Databases[0]
+	assert.Equal(t, "mysql", primary.Type)
+	assert.Equal(t, "primary", primary.Name)
+	assert.Equal(t, "primary-db", primary.Host)
+	assert.Equal(t, 3306, primary.Port)
+	assert.Equal(t, "primary_user", primary.User)
+	assert.Equal(t, "primary_pass", primary.Password)
+	assert.Equal(t, "primary_db", primary.Database)
+
+	// Check MongoDB instance
+	mongo := cfg.Databases[1]
+	assert.Equal(t, "mongodb", mongo.Type)
+	assert.Equal(t, "mongo", mongo.Name)
+	assert.Equal(t, "mongodb://mongo-server:27017", mongo.URI)
+	assert.Equal(t, "mongo_db", mongo.Database)
+	assert.Equal(t, uint64(100), mongo.MaxPoolSize)
+	assert.Equal(t, uint64(10), mongo.MinPoolSize)
+}
+
+func TestLoad_BackwardCompatibility_SingleDatabase(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	configContent := `
+database:
+  host: old-db
+  port: 3307
+  user: old_user
+  password: old_pass
+  database: old_db
+  charset: utf8mb4
+`
+	err := os.WriteFile(configPath, []byte(configContent), 0644)
+	assert.NoError(t, err)
+
+	cfg, err := Load(configPath)
+	assert.NoError(t, err)
+	assert.Len(t, cfg.Databases, 1)
+	assert.Equal(t, "default", cfg.Default)
+
+	db := cfg.Databases[0]
+	assert.Equal(t, "mysql", db.Type)
+	assert.Equal(t, "default", db.Name)
+	assert.Equal(t, "old-db", db.Host)
+	assert.Equal(t, 3307, db.Port)
+	assert.Equal(t, "old_user", db.User)
+	assert.Equal(t, "old_pass", db.Password)
+	assert.Equal(t, "old_db", db.Database)
+	assert.Equal(t, "utf8mb4", db.Charset)
+}
+
+func TestLoad_BackwardCompatibility_MongoConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	configContent := `
+database:
+  host: mysql-db
+  port: 3306
+  user: mysql_user
+  password: mysql_pass
+  database: mysql_db
+mongo:
+  uri: mongodb://mongo:27017
+  database: mongo_db
+  maxPoolSize: 50
+  minPoolSize: 5
+`
+	err := os.WriteFile(configPath, []byte(configContent), 0644)
+	assert.NoError(t, err)
+
+	cfg, err := Load(configPath)
+	assert.NoError(t, err)
+	assert.Len(t, cfg.Databases, 2)
+	assert.Equal(t, "mongo", cfg.Default) // MongoDB takes precedence as default
+
+	// MySQL instance
+	mysql := cfg.Databases[0]
+	assert.Equal(t, "mysql", mysql.Type)
+	assert.Equal(t, "default", mysql.Name)
+
+	// MongoDB instance
+	mongo := cfg.Databases[1]
+	assert.Equal(t, "mongodb", mongo.Type)
+	assert.Equal(t, "mongo", mongo.Name)
+	assert.Equal(t, "mongodb://mongo:27017", mongo.URI)
+	assert.Equal(t, uint64(50), mongo.MaxPoolSize)
+	assert.Equal(t, uint64(5), mongo.MinPoolSize)
+}
+
+func TestLoad_MultiDatabase_EnvironmentVariables(t *testing.T) {
+	os.Setenv("DB_INSTANCES", "primary,secondary")
+	os.Setenv("DB_PRIMARY_HOST", "primary-env")
+	os.Setenv("DB_PRIMARY_DATABASE", "primary_env_db")
+	os.Setenv("DB_SECONDARY_HOST", "secondary-env")
+	os.Setenv("DB_SECONDARY_PORT", "3307")
+	defer func() {
+		os.Unsetenv("DB_INSTANCES")
+		os.Unsetenv("DB_PRIMARY_HOST")
+		os.Unsetenv("DB_PRIMARY_DATABASE")
+		os.Unsetenv("DB_SECONDARY_HOST")
+		os.Unsetenv("DB_SECONDARY_PORT")
+	}()
+
+	cfg, err := Load("")
+	assert.NoError(t, err)
+	assert.Len(t, cfg.Databases, 2)
+	assert.Equal(t, "primary", cfg.Default) // Defaults to first instance
+
+	// Check primary instance (created from env)
+	primary := cfg.Databases[0]
+	assert.Equal(t, "mysql", primary.Type)
+	assert.Equal(t, "primary", primary.Name)
+	assert.Equal(t, "primary-env", primary.Host)
+	assert.Equal(t, "primary_env_db", primary.Database)
+
+	// Check secondary instance
+	secondary := cfg.Databases[1]
+	assert.Equal(t, "mysql", secondary.Type)
+	assert.Equal(t, "secondary", secondary.Name)
+	assert.Equal(t, "secondary-env", secondary.Host)
+	assert.Equal(t, 3307, secondary.Port)
+}
+
+func TestLoadFromMCP_MultiDatabase(t *testing.T) {
+	params := map[string]interface{}{
+		"instance": "test",
+		"type":     "mysql",
+		"host":     "mcp-host",
+		"port":     float64(3308),
+		"user":     "mcp_user",
+		"password": "mcp_pass",
+		"database": "mcp_db",
+	}
+
+	cfg := LoadFromMCP(params)
+	assert.Equal(t, "test", cfg.Default)
+	assert.Len(t, cfg.Databases, 1)
+
+	db := cfg.Databases[0]
+	assert.Equal(t, "mysql", db.Type)
+	assert.Equal(t, "test", db.Name)
+	assert.Equal(t, "mcp-host", db.Host)
+	assert.Equal(t, 3308, db.Port)
+	assert.Equal(t, "mcp_user", db.User)
+	assert.Equal(t, "mcp_pass", db.Password)
+	assert.Equal(t, "mcp_db", db.Database)
+}
+
+func TestLoadFromMCP_CreateNewInstance(t *testing.T) {
+	// Test creating an instance that doesn't exist
+	params := map[string]interface{}{
+		"instance": "new-instance",
+		"host":     "new-host",
+	}
+
+	cfg := LoadFromMCP(params)
+	assert.Equal(t, "new-instance", cfg.Default)
+	assert.Len(t, cfg.Databases, 1)
+
+	db := cfg.Databases[0]
+	assert.Equal(t, "mysql", db.Type)
+	assert.Equal(t, "new-instance", db.Name)
+	assert.Equal(t, "new-host", db.Host)
+	assert.Equal(t, 3306, db.Port) // Default port
+}
+
+func TestLoad_MultiDatabaseValidation(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	// Multi-database config with missing default
+	configContent := `
+databases:
+  - type: mysql
+    name: primary
+    host: primary-db
+    port: 3306
+    user: primary_user
+    password: primary_pass
+    database: primary_db
+  - type: mysql
+    name: secondary
+    host: secondary-db
+    port: 3307
+    user: secondary_user
+    password: secondary_pass
+    database: secondary_db
+`
+	err := os.WriteFile(configPath, []byte(configContent), 0644)
+	assert.NoError(t, err)
+
+	cfg, err := Load(configPath)
+	assert.NoError(t, err)
+	assert.Len(t, cfg.Databases, 2)
+	assert.Equal(t, "primary", cfg.Default) // Should default to first instance
+}
+
+func TestLoad_MissingDefaultInstance(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	// Invalid config: default instance doesn't exist
+	configContent := `
+databases:
+  - type: mysql
+    name: primary
+    host: primary-db
+    port: 3306
+    user: primary_user
+    password: primary_pass
+    database: primary_db
+default: nonexistent
+`
+	err := os.WriteFile(configPath, []byte(configContent), 0644)
+	assert.NoError(t, err)
+
+	cfg, err := Load(configPath)
+	assert.NoError(t, err)
+	// Auto-correct to first instance when default doesn't exist
+	assert.Equal(t, "primary", cfg.Default)
 }

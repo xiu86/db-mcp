@@ -1,392 +1,275 @@
 package repository
 
 import (
+	"context"
 	"testing"
 
-	"db-mcp/internal/detector"
-	"db-mcp/tests/mocks"
+	"db-mcp/internal/driver"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestRepositoryMock_Query_Basic(t *testing.T) {
-	mockDB := mocks.NewMockDB()
-	repo := New(mockDB.ToGormDB())
+func TestRepositoryTypes(t *testing.T) {
+	t.Run("QueryRequest", func(t *testing.T) {
+		req := &QueryRequest{
+			Table:  "users",
+			Fields: []string{"id", "name"},
+			Where:  map[string]interface{}{"status": "active"},
+			Limit:  10,
+			Offset: 0,
+		}
 
-	// Add test data
-	mockDB.AddTable("users", []map[string]interface{}{
-		{"id": 1, "name": "Alice", "email": "alice@example.com", "status": "active"},
-		{"id": 2, "name": "Bob", "email": "bob@example.com", "status": "inactive"},
+		assert.Equal(t, "users", req.Table)
+		assert.Len(t, req.Fields, 2)
+		assert.Equal(t, 10, req.Limit)
 	})
 
-	req := &QueryRequest{
-		Table:  "users",
-		Fields: []string{"id", "name"},
-		Limit:  10,
-	}
+	t.Run("InsertRequest", func(t *testing.T) {
+		req := &InsertRequest{
+			Table: "users",
+			Data: map[string]interface{}{
+				"name": "test",
+			},
+		}
 
-	assert.NotNil(t, repo)
-	assert.Equal(t, "users", req.Table)
-	assert.Len(t, req.Fields, 2)
-}
-
-func TestRepositoryMock_Query_WithOrder(t *testing.T) {
-	_, repo := New(nil), setupMockDB()
-	req := &QueryRequest{
-		Table: "users",
-		Order: []OrderBy{
-			{Field: "name", Direction: "asc"},
-			{Field: "id", Direction: "desc"},
-		},
-	}
-
-	assert.NotNil(t, repo)
-	assert.Len(t, req.Order, 2)
-	assert.Equal(t, "name", req.Order[0].Field)
-	assert.Equal(t, "asc", req.Order[0].Direction)
-}
-
-func setupMockDB() *mocks.MockDB {
-	mockDB := mocks.NewMockDB()
-	mockDB.AddTable("users", []map[string]interface{}{
-		{"id": 1, "name": "Alice"},
-		{"id": 2, "name": "Bob"},
+		assert.Equal(t, "users", req.Table)
+		assert.Equal(t, "test", req.Data["name"])
 	})
-	return mockDB
+
+	t.Run("UpdateRequest", func(t *testing.T) {
+		req := &UpdateRequest{
+			Table: "users",
+			Data:  map[string]interface{}{"name": "updated"},
+			Where: map[string]interface{}{"id": 1},
+		}
+
+		assert.Equal(t, "users", req.Table)
+		assert.Equal(t, "updated", req.Data["name"])
+		assert.Equal(t, 1, req.Where["id"])
+	})
+
+	t.Run("DeleteRequest", func(t *testing.T) {
+		req := &DeleteRequest{
+			Table: "users",
+			Where: map[string]interface{}{"id": 1},
+		}
+
+		assert.Equal(t, "users", req.Table)
+		assert.Equal(t, 1, req.Where["id"])
+	})
+
+	t.Run("BatchInsertRequest", func(t *testing.T) {
+		req := &BatchInsertRequest{
+			Table: "users",
+			Data: []map[string]interface{}{
+				{"name": "user1"},
+				{"name": "user2"},
+			},
+		}
+
+		assert.Equal(t, "users", req.Table)
+		assert.Len(t, req.Data, 2)
+	})
+
+	t.Run("BatchUpdateRequest", func(t *testing.T) {
+		req := &BatchUpdateRequest{
+			Table:    "users",
+			Data:     []map[string]interface{}{{"id": 1, "name": "updated"}},
+			KeyField: "id",
+		}
+
+		assert.Equal(t, "users", req.Table)
+		assert.Equal(t, "id", req.KeyField)
+	})
+
+	t.Run("BatchDeleteRequest", func(t *testing.T) {
+		req := &BatchDeleteRequest{
+			Table:   "users",
+			IDs:     []string{"1", "2"},
+			IDField: "id",
+		}
+
+		assert.Equal(t, "users", req.Table)
+		assert.Len(t, req.IDs, 2)
+	})
+
+	t.Run("JoinRequest", func(t *testing.T) {
+		req := &JoinRequest{
+			Tables: []TableRef{{Name: "users", Alias: "u"}},
+			Joins: []JoinClause{
+				{Type: "left", FromTable: "u", FromField: "id", ToTable: "orders", ToField: "user_id"},
+			},
+			Fields: []string{"u.id", "u.name"},
+			Limit: 10,
+		}
+
+		assert.Len(t, req.Tables, 1)
+		assert.Len(t, req.Joins, 1)
+	})
+
+	t.Run("QueryResult", func(t *testing.T) {
+		result := &QueryResult{
+			Rows:    []map[string]interface{}{{"id": 1, "name": "test"}},
+			Total:   1,
+			Message: "success",
+		}
+
+		assert.Len(t, result.Rows, 1)
+		assert.Equal(t, int64(1), result.Total)
+	})
+
+	t.Run("MutationResult", func(t *testing.T) {
+		result := &MutationResult{
+			AffectedRows: 5,
+			LastInsertID: 100,
+			Message:      "success",
+		}
+
+		assert.Equal(t, int64(5), result.AffectedRows)
+		assert.Equal(t, int64(100), result.LastInsertID)
+	})
+
+	t.Run("BatchResult", func(t *testing.T) {
+		result := &BatchResult{
+			SuccessCount: 10,
+			FailedCount: 2,
+			Errors: []BatchError{
+				{Index: 3, Message: "error1"},
+				{Index: 7, Message: "error2"},
+			},
+		}
+
+		assert.Equal(t, int64(10), result.SuccessCount)
+		assert.Equal(t, int64(2), result.FailedCount)
+		assert.Len(t, result.Errors, 2)
+	})
+
+	t.Run("TableSchema", func(t *testing.T) {
+		schema := &TableSchema{
+			TableName: "users",
+			Columns: []ColumnInfo{
+				{Name: "id", DataType: "bigint", IsNullable: "NO", ColumnKey: "PRI"},
+				{Name: "name", DataType: "varchar", IsNullable: "YES", ColumnKey: ""},
+			},
+		}
+
+		assert.Equal(t, "users", schema.TableName)
+		assert.Len(t, schema.Columns, 2)
+	})
 }
 
-func TestRepositoryMock_Insert(t *testing.T) {
-	_, repo := New(nil), setupMockDB()
+// MockDatabaseDriverForTest is a minimal mock for testing
+type MockDatabaseDriverForTest struct{}
 
-	req := &InsertRequest{
+func (m *MockDatabaseDriverForTest) Ping(ctx context.Context) error { return nil }
+func (m *MockDatabaseDriverForTest) Close() error                { return nil }
+func (m *MockDatabaseDriverForTest) Query(ctx context.Context, req *QueryRequest) (*QueryResult, error) {
+	return &QueryResult{Rows: []map[string]interface{}{}}, nil
+}
+func (m *MockDatabaseDriverForTest) Insert(ctx context.Context, req *InsertRequest) (*MutationResult, error) {
+	return &MutationResult{AffectedRows: 1}, nil
+}
+func (m *MockDatabaseDriverForTest) Update(ctx context.Context, req *UpdateRequest) (*MutationResult, error) {
+	return &MutationResult{AffectedRows: 1}, nil
+}
+func (m *MockDatabaseDriverForTest) Delete(ctx context.Context, req *DeleteRequest) (*MutationResult, error) {
+	return &MutationResult{AffectedRows: 1}, nil
+}
+func (m *MockDatabaseDriverForTest) BatchInsert(ctx context.Context, req *BatchInsertRequest) (*BatchResult, error) {
+	return &BatchResult{SuccessCount: int64(len(req.Data))}, nil
+}
+func (m *MockDatabaseDriverForTest) BatchUpdate(ctx context.Context, req *BatchUpdateRequest) (*BatchResult, error) {
+	return &BatchResult{SuccessCount: int64(len(req.Data))}, nil
+}
+func (m *MockDatabaseDriverForTest) BatchDelete(ctx context.Context, req *BatchDeleteRequest) (*BatchResult, error) {
+	return &BatchResult{SuccessCount: int64(len(req.IDs))}, nil
+}
+func (m *MockDatabaseDriverForTest) JoinQuery(ctx context.Context, req *JoinRequest) (*QueryResult, error) {
+	return &QueryResult{Rows: []map[string]interface{}{}}, nil
+}
+func (m *MockDatabaseDriverForTest) GetTableSchema(tableName string) (*TableSchema, error) {
+	return &TableSchema{TableName: tableName}, nil
+}
+func (m *MockDatabaseDriverForTest) UseDatabase(database string) error { return nil }
+func (m *MockDatabaseDriverForTest) CurrentDatabase() string { return "test" }
+func (m *MockDatabaseDriverForTest) DriverType() driver.DriverType { return driver.DriverMySQL }
+
+func TestRepositoryWithMockDriver(t *testing.T) {
+	mock := &MockDatabaseDriverForTest{}
+	repo := New(mock)
+	assert.NotNil(t, repo)
+
+	// Test Query method
+	result, err := repo.Query(context.Background(), &QueryRequest{Table: "users"})
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+
+	// Test Insert method
+	insertResult, err := repo.Insert(context.Background(), &InsertRequest{
 		Table: "users",
-		Data: map[string]interface{}{
-			"name":  "David",
-			"email": "david@example.com",
-		},
-	}
+		Data:  map[string]interface{}{"name": "test"},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), insertResult.AffectedRows)
 
-	assert.NotNil(t, repo)
-	assert.Equal(t, "users", req.Table)
-	assert.Equal(t, "David", req.Data["name"])
-}
-
-func TestRepositoryMock_Update(t *testing.T) {
-	_, repo := New(nil), setupMockDB()
-
-	req := &UpdateRequest{
+	// Test Update method
+	updateResult, err := repo.Update(context.Background(), &UpdateRequest{
 		Table: "users",
-		Data: map[string]interface{}{
-			"status": "inactive",
-		},
-		Where: map[string]interface{}{
-			"id": 1,
-		},
-	}
+		Data:  map[string]interface{}{"name": "updated"},
+		Where: map[string]interface{}{"id": 1},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), updateResult.AffectedRows)
 
-	assert.NotNil(t, repo)
-	assert.Equal(t, "users", req.Table)
-	assert.Equal(t, "inactive", req.Data["status"])
-}
-
-func TestRepositoryMock_LogicalDelete_WithDeleteField(t *testing.T) {
-	_, repo := New(nil), setupMockDB()
-
-	deleteField := &detector.DeleteFieldInfo{
-		TableName: "users",
-		Fields: []detector.Field{
-			{Name: "is_del", Type: "tinyint", TrueValue: "1"},
-			{Name: "deleted_time", Type: "datetime", TrueValue: "0000-00-00 00:00:00"},
-		},
-	}
-
-	req := &DeleteRequest{
-		Table:       "users",
-		Where:       map[string]interface{}{"id": 1},
-		DeleteField: deleteField,
-	}
-
-	assert.NotNil(t, repo)
-	assert.NotNil(t, req.DeleteField)
-	assert.Len(t, req.DeleteField.Fields, 2)
-}
-
-func TestRepositoryMock_LogicalDelete_NoDeleteField(t *testing.T) {
-	repo := New(nil)
-
-	req := &DeleteRequest{
+	// Test Delete method
+	deleteResult, err := repo.Delete(context.Background(), &DeleteRequest{
 		Table: "users",
 		Where: map[string]interface{}{"id": 1},
-	}
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), deleteResult.AffectedRows)
 
-	_, err := repo.LogicalDelete(req)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no delete field detected")
-}
-
-func TestRepositoryMock_BatchInsert(t *testing.T) {
-	_, repo := New(nil), setupMockDB()
-
-	req := &BatchInsertRequest{
+	// Test BatchInsert method
+	batchResult, err := repo.BatchInsert(context.Background(), &BatchInsertRequest{
 		Table: "users",
 		Data: []map[string]interface{}{
-			{"name": "User1", "email": "user1@example.com"},
-			{"name": "User2", "email": "user2@example.com"},
-			{"name": "User3", "email": "user3@example.com"},
+			{"name": "user1"},
+			{"name": "user2"},
 		},
-	}
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), batchResult.SuccessCount)
 
-	assert.NotNil(t, repo)
-	assert.Len(t, req.Data, 3)
-}
-
-func TestRepositoryMock_BatchUpdate(t *testing.T) {
-	_, repo := New(nil), setupMockDB()
-
-	req := &BatchUpdateRequest{
-		Table:    "users",
+	// Test BatchUpdate method
+	batchUpdateResult, err := repo.BatchUpdate(context.Background(), &BatchUpdateRequest{
+		Table: "users",
+		Data: []map[string]interface{}{
+			{"id": 1, "name": "updated1"},
+			{"id": 2, "name": "updated2"},
+		},
 		KeyField: "id",
-		Data: []map[string]interface{}{
-			{"id": 1, "status": "active"},
-			{"id": 2, "status": "inactive"},
-		},
-	}
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), batchUpdateResult.SuccessCount)
 
-	assert.NotNil(t, repo)
-	assert.Equal(t, "id", req.KeyField)
-	assert.Len(t, req.Data, 2)
-}
-
-func TestRepositoryMock_BatchLogicalDelete_WithDeleteField(t *testing.T) {
-	_, repo := New(nil), setupMockDB()
-
-	deleteField := &detector.DeleteFieldInfo{
-		TableName: "users",
-		Fields: []detector.Field{
-			{Name: "is_del", Type: "tinyint", TrueValue: "1"},
-		},
-	}
-
-	req := &BatchDeleteRequest{
-		Table:       "users",
-		IDs:         []string{"1", "2", "3"},
-		IDField:     "id",
-		DeleteField: deleteField,
-	}
-
-	assert.NotNil(t, repo)
-	assert.Len(t, req.IDs, 3)
-	assert.Equal(t, "id", req.IDField)
-}
-
-func TestRepositoryMock_BatchLogicalDelete_NoDeleteField(t *testing.T) {
-	repo := New(nil)
-
-	req := &BatchDeleteRequest{
+	// Test BatchDelete method
+	batchDeleteResult, err := repo.BatchDelete(context.Background(), &BatchDeleteRequest{
 		Table:   "users",
 		IDs:     []string{"1", "2"},
 		IDField: "id",
-	}
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), batchDeleteResult.SuccessCount)
 
-	_, err := repo.BatchLogicalDelete(req)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no delete field detected")
-}
-
-func TestRepositoryMock_JoinQuery_TwoTables(t *testing.T) {
-	_, repo := New(nil), setupMockDB()
-
-	req := &JoinRequest{
-		Tables: []TableRef{
-			{Name: "users", Alias: "u"},
-			{Name: "orders", Alias: "o"},
-		},
-		Joins: []JoinClause{
-			{
-				Type:      "inner",
-				FromTable: "u",
-				FromField: "id",
-				ToTable:   "o",
-				ToField:   "user_id",
-			},
-		},
-		Fields: []string{"u.id", "u.name", "o.total"},
-		Limit:  100,
-	}
-
-	assert.NotNil(t, repo)
-	assert.Len(t, req.Tables, 2)
-	assert.Len(t, req.Joins, 1)
-}
-
-func TestRepositoryMock_JoinQuery_LeftJoin(t *testing.T) {
-	_, repo := New(nil), setupMockDB()
-
-	req := &JoinRequest{
-		Tables: []TableRef{
-			{Name: "users", Alias: "u"},
-			{Name: "orders", Alias: "o"},
-		},
-		Joins: []JoinClause{
-			{
-				Type:      "left",
-				FromTable: "u",
-				FromField: "id",
-				ToTable:   "o",
-				ToField:   "user_id",
-			},
-		},
-	}
-
-	assert.NotNil(t, repo)
-	assert.Equal(t, "left", req.Joins[0].Type)
-}
-
-func TestRepositoryMock_JoinQuery_RightJoin(t *testing.T) {
-	_, repo := New(nil), setupMockDB()
-
-	req := &JoinRequest{
-		Tables: []TableRef{
-			{Name: "users", Alias: "u"},
-			{Name: "orders", Alias: "o"},
-		},
-		Joins: []JoinClause{
-			{
-				Type:      "right",
-				FromTable: "u",
-				FromField: "id",
-				ToTable:   "o",
-				ToField:   "user_id",
-			},
-		},
-	}
-
-	assert.NotNil(t, repo)
-	assert.Equal(t, "right", req.Joins[0].Type)
-}
-
-func TestRepositoryMock_JoinQuery_Invalid(t *testing.T) {
-	repo := New(nil)
-
-	req := &JoinRequest{
-		Tables: []TableRef{
-			{Name: "users", Alias: "u"},
-		},
-	}
-
-	_, err := repo.JoinQuery(req)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "at least 2 tables required")
-}
-
-func TestRepositoryMock_JoinQuery_WithWhere(t *testing.T) {
-	_, repo := New(nil), setupMockDB()
-
-	req := &JoinRequest{
-		Tables: []TableRef{
-			{Name: "users", Alias: "u"},
-			{Name: "orders", Alias: "o"},
-		},
-		Joins: []JoinClause{
-			{
-				Type:      "inner",
-				FromTable: "u",
-				FromField: "id",
-				ToTable:   "o",
-				ToField:   "user_id",
-			},
-		},
-		Where: map[string]interface{}{
-			"u.status": "active",
-		},
-		Limit: 50,
-	}
-
-	assert.NotNil(t, repo)
-	assert.Equal(t, "active", req.Where["u.status"])
-	assert.Equal(t, 50, req.Limit)
-}
-
-func TestRepositoryMock_JoinQuery_WithOrder(t *testing.T) {
-	_, repo := New(nil), setupMockDB()
-
-	req := &JoinRequest{
-		Tables: []TableRef{
-			{Name: "users", Alias: "u"},
-			{Name: "orders", Alias: "o"},
-		},
-		Joins: []JoinClause{
-			{
-				Type:      "inner",
-				FromTable: "u",
-				FromField: "id",
-				ToTable:   "o",
-				ToField:   "user_id",
-			},
-		},
-		Order: []OrderBy{
-			{Field: "u.created_at", Direction: "desc"},
-			{Field: "o.id", Direction: "asc"},
-		},
-	}
-
-	assert.NotNil(t, repo)
-	assert.Len(t, req.Order, 2)
-}
-
-func TestRepositoryMock_ErrorHandling_LogicalDeleteNilField(t *testing.T) {
-	repo := New(nil)
-
-	req := &DeleteRequest{
-		Table: "users",
-		Where: map[string]interface{}{"id": 1},
-	}
-
-	_, err := repo.LogicalDelete(req)
-	assert.Error(t, err)
-}
-
-func TestRepositoryMock_ErrorHandling_BatchLogicalDeleteNilField(t *testing.T) {
-	repo := New(nil)
-
-	req := &BatchDeleteRequest{
-		Table:   "users",
-		IDs:     []string{"1", "2"},
-		IDField: "id",
-	}
-
-	_, err := repo.BatchLogicalDelete(req)
-	assert.Error(t, err)
-}
-
-func TestRepositoryMock_ErrorHandling_JoinQueryInsufficientTables(t *testing.T) {
-	repo := New(nil)
-
-	req := &JoinRequest{
+	// Test JoinQuery method
+	joinResult, err := repo.JoinQuery(context.Background(), &JoinRequest{
 		Tables: []TableRef{{Name: "users", Alias: "u"}},
-	}
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, joinResult)
 
-	_, err := repo.JoinQuery(req)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "at least 2 tables")
-}
-
-func TestRepositoryMock_MultipleDeleteFields(t *testing.T) {
-	deleteField := &detector.DeleteFieldInfo{
-		TableName: "users",
-		Fields: []detector.Field{
-			{Name: "is_del", Type: "tinyint", TrueValue: "1"},
-			{Name: "deleted_at", Type: "datetime", TrueValue: "0000-00-00 00:00:00"},
-		},
-	}
-
-	req := &DeleteRequest{
-		Table:       "users",
-		Where:       map[string]interface{}{"id": 1},
-		DeleteField: deleteField,
-	}
-
-	assert.Len(t, req.DeleteField.Fields, 2)
-	assert.Equal(t, "is_del", req.DeleteField.Fields[0].Name)
-	assert.Equal(t, "deleted_at", req.DeleteField.Fields[1].Name)
+	// Test GetTableSchema method
+	schema, err := repo.GetTableSchema("users")
+	assert.NoError(t, err)
+	assert.Equal(t, "users", schema.TableName)
 }

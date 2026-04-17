@@ -1,14 +1,16 @@
 # db-mcp
 
-一个基于 Go、GORM 和 `mark3labs/mcp-go` 的 MySQL MCP (Model Context Protocol) Server，用于通过 Claude Code 等 MCP Client 以结构化工具方式安全访问数据库。
+一个基于 Go 的 MCP (Model Context Protocol) Server，支持 MySQL 和 MongoDB，用于通过 Claude Code 等 MCP Client 以结构化工具方式安全访问数据库。
 
 ## Features
 
+- 支持 MySQL 和 MongoDB 多数据库实例管理
 - 支持常见数据库工具：`db_query`、`db_insert`、`db_update`、`db_delete`
 - 支持批量操作：`db_batch_insert`、`db_batch_update`、`db_batch_delete`
-- 支持多表 JOIN 查询：`db_join`
+- 支持多表 JOIN 查询：`db_join`（MySQL 原生，MongoDB 通过 `$lookup` 模拟）
 - 支持事务执行：`db_transaction`
 - 支持表结构查看：`db_describe`
+- 支持数据库实例切换：`db_switch`、`db_list_instances`
 - 自动检测逻辑删除字段
 - 内置审计日志输出
 - 支持限流、查询超时和连接池配置
@@ -17,8 +19,8 @@
 ## Tech Stack
 
 - Go 1.26+
-- GORM
-- MySQL Driver
+- GORM（MySQL）
+- mongo-go-driver（MongoDB）
 - [mark3labs/mcp-go](https://github.com/mark3labs/mcp-go)
 
 ## Repository Structure
@@ -29,6 +31,7 @@ db-mcp/
 ├── internal/config/       # 配置加载
 ├── internal/connection/   # 数据库连接管理
 ├── internal/detector/     # 逻辑删除字段检测
+├── internal/driver/       # 数据库驱动抽象（MySQL / MongoDB）
 ├── internal/mcp/          # MCP 工具注册与处理
 ├── internal/middleware/   # 限流与超时控制
 ├── internal/repository/   # 数据访问层
@@ -42,7 +45,7 @@ db-mcp/
 ## Requirements
 
 - Go 1.26 或更高版本
-- MySQL 5.7+/8.0+
+- MySQL 5.7+/8.0+ 或 MongoDB 4.0+
 - 可访问目标数据库的账号
 
 ## Quick Start
@@ -65,14 +68,28 @@ make build
 
 项目默认读取根目录 `config.yaml`。
 
+### 多数据库实例配置（v0.0.2+）
+
 ```yaml
-database:
-  host: localhost
-  port: 3306
-  user: root
-  password: "your-password"
-  database: "your-database"
-  charset: utf8mb4
+databases:
+  - type: mysql
+    name: default
+    host: localhost
+    port: 3306
+    user: root
+    password: "your-password"
+    database: "your-database"
+    charset: utf8mb4
+  - type: mongodb
+    name: mongo
+    host: localhost
+    port: 27017
+    user: openIM
+    password: "openIM123"
+    database: "openim_v3"
+    uri: "mongodb://openIM:openIM123@localhost:37017/openim_v3?authSource=openim_v3"
+
+default: default
 
 pool:
   maxIdleConns: 10
@@ -98,7 +115,9 @@ timeout:
   transaction: 60
 ```
 
-也可以通过环境变量覆盖：
+> `databases` 数组中的 `name` 为实例名，`type` 支持 `mysql` 和 `mongodb`。`default` 指定默认使用的实例。
+
+### 单实例环境变量覆盖
 
 ```bash
 export DB_HOST=localhost
@@ -108,7 +127,21 @@ export DB_PASSWORD=your-password
 export DB_NAME=your-database
 ```
 
+### 多实例环境变量配置
+
+```bash
+export DB_INSTANCES=primary,secondary
+export DB_PRIMARY_HOST=db1.example.com
+export DB_PRIMARY_PORT=3306
+export DB_SECONDARY_HOST=db2.example.com
+export DB_SECONDARY_PORT=3306
+```
+
 > `user`、`password`、`database` 为必填项；若未提供，程序会在启动时失败。
+
+### 向后兼容
+
+v0.0.1 的单 `database` 配置格式仍然兼容，会自动转换为 `databases` 数组。
 
 ### 3. Run the server
 
@@ -180,11 +213,12 @@ claude mcp get db-mcp
 
 ### `db_query`
 
-查询表数据。
+查询表数据。支持通过 `instance` 参数指定目标数据库实例。
 
 ```json
 {
   "table": "users",
+  "instance": "default",
   "fields": ["id", "name", "email"],
   "where": {"status": "active"},
   "order": [{"field": "created_at", "direction": "desc"}],
@@ -200,6 +234,7 @@ claude mcp get db-mcp
 ```json
 {
   "table": "users",
+  "instance": "default",
   "data": {"name": "John", "email": "john@example.com"}
 }
 ```
@@ -211,6 +246,7 @@ claude mcp get db-mcp
 ```json
 {
   "table": "users",
+  "instance": "default",
   "data": {"name": "John Doe"},
   "where": {"id": 1}
 }
@@ -223,6 +259,7 @@ claude mcp get db-mcp
 ```json
 {
   "table": "users",
+  "instance": "default",
   "where": {"id": 1}
 }
 ```
@@ -234,6 +271,7 @@ claude mcp get db-mcp
 ```json
 {
   "table": "users",
+  "instance": "default",
   "data": [
     {"name": "User 1", "email": "user1@example.com"},
     {"name": "User 2", "email": "user2@example.com"}
@@ -248,6 +286,7 @@ claude mcp get db-mcp
 ```json
 {
   "table": "users",
+  "instance": "default",
   "data": [
     {"id": 1, "name": "Updated 1"},
     {"id": 2, "name": "Updated 2"}
@@ -263,6 +302,7 @@ claude mcp get db-mcp
 ```json
 {
   "table": "users",
+  "instance": "default",
   "ids": ["1", "2", "3"],
   "id_field": "id"
 }
@@ -270,7 +310,7 @@ claude mcp get db-mcp
 
 ### `db_join`
 
-执行多表 JOIN 查询。
+执行多表 JOIN 查询（MySQL 原生 JOIN；MongoDB 通过 `$lookup` 聚合模拟）。
 
 ```json
 {
@@ -299,6 +339,7 @@ claude mcp get db-mcp
 
 ```json
 {
+  "instance": "default",
   "operations": [
     {"type": "insert", "table": "orders", "data": {"user_id": 1, "amount": 100}},
     {"type": "update", "table": "users", "data": {"balance": 900}, "where": {"id": 1}}
@@ -312,8 +353,28 @@ claude mcp get db-mcp
 
 ```json
 {
+  "instance": "default",
   "table": "users"
 }
+```
+
+### `db_switch`
+
+切换当前默认数据库实例或数据库。
+
+```json
+{
+  "instance": "mongo",
+  "database": "openim_v3"
+}
+```
+
+### `db_list_instances`
+
+列出所有可用的数据库实例。
+
+```json
+{}
 ```
 
 工具注册位置见 `internal/mcp/tools.go:114`。
@@ -395,7 +456,8 @@ make test-coverage
 
 ## Roadmap Ideas
 
-- 支持更多数据库类型
+- [x] 多数据库实例管理
+- [x] MongoDB 支持
 - 提供 HTTP/SSE 传输模式
 - 增强更细粒度的权限控制与审计检索能力
 

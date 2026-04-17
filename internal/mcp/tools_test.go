@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"db-mcp/internal/config"
-	"db-mcp/internal/repository"
+	"db-mcp/internal/driver"
 	"db-mcp/pkg/logger"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -13,11 +13,16 @@ import (
 
 func TestNewMCPServer(t *testing.T) {
 	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Host:     "localhost",
-			Port:     3306,
-			Database: "test_db",
+		Databases: []config.InstanceConfig{
+			{
+				Type:     "mysql",
+				Name:     "default",
+				Host:     "localhost",
+				Port:     3306,
+				Database: "test_db",
+			},
 		},
+		Default: "default",
 	}
 	log := logger.NewLogger(&config.LogConfig{Level: "info", Format: "text", Output: "stdout"})
 
@@ -25,14 +30,12 @@ func TestNewMCPServer(t *testing.T) {
 
 	assert.NotNil(t, server)
 	assert.NotNil(t, server.server)
-	assert.NotNil(t, server.crud)
-	assert.NotNil(t, server.txService)
 	assert.NotNil(t, server.config)
 	assert.NotNil(t, server.logger)
 }
 
 func TestMCPServer_GetServer(t *testing.T) {
-	cfg := &config.Config{}
+	cfg := config.DefaultConfig()
 	log := logger.NewLogger(&config.LogConfig{Level: "info", Format: "text", Output: "stdout"})
 
 	server := NewMCPServer(nil, cfg, log)
@@ -340,7 +343,7 @@ func TestBatchResult_JSON(t *testing.T) {
 
 func TestMCPServer_Response_Format(t *testing.T) {
 	t.Run("QueryResult format", func(t *testing.T) {
-		result := &repository.QueryResult{
+		result := &driver.QueryResult{
 			Rows: []map[string]interface{}{
 				{"id": 1, "name": "Alice"},
 				{"id": 2, "name": "Bob"},
@@ -356,7 +359,7 @@ func TestMCPServer_Response_Format(t *testing.T) {
 	})
 
 	t.Run("MutationResult format", func(t *testing.T) {
-		result := &repository.MutationResult{
+		result := &driver.MutationResult{
 			AffectedRows: 1,
 			LastInsertID: 100,
 			Message:      "Insert successful",
@@ -604,13 +607,18 @@ func TestJoinRequest_Parsing(t *testing.T) {
 
 func TestMCPServer_Config_Passing(t *testing.T) {
 	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Host:     "localhost",
-			Port:     3306,
-			User:     "test_user",
-			Password: "test_pass",
-			Database: "test_db",
+		Databases: []config.InstanceConfig{
+			{
+				Type:     "mysql",
+				Name:     "default",
+				Host:     "localhost",
+				Port:     3306,
+				User:     "test_user",
+				Password: "test_pass",
+				Database: "test_db",
+			},
 		},
+		Default: "default",
 		Log: config.LogConfig{
 			Level:  "debug",
 			Format: "json",
@@ -622,5 +630,5 @@ func TestMCPServer_Config_Passing(t *testing.T) {
 
 	assert.NotNil(t, server)
 	assert.NotNil(t, server.config)
-	assert.Equal(t, "test_db", server.config.Database.Database)
+	assert.Equal(t, "test_db", server.config.Databases[0].Database)
 }
