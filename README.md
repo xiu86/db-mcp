@@ -250,10 +250,35 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/sse
 ### Claude Code HTTP Mode
 
 ```bash
-claude mcp add db-mcp -- /path/to/db-mcp/bin/db-mcp
+# HTTP 传输（推荐）
+claude mcp add --transport http db-mcp http://localhost:8080/mcp
+
+# 带 Token 认证
+claude mcp add --transport http db-mcp http://localhost:8080/mcp \
+  --header "Authorization: Bearer your-token"
+
+# SSE 传输
+claude mcp add --transport sse db-mcp http://localhost:8080/sse \
+  --header "Authorization: Bearer your-token"
 ```
 
-Set env vars before running, or configure via config.yaml.
+或在项目根目录创建 `.mcp.json`：
+
+```json
+{
+  "mcpServers": {
+    "db-mcp": {
+      "type": "http",
+      "url": "http://localhost:8080/mcp",
+      "headers": {
+        "Authorization": "Bearer ${DB_MCP_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+> 启动 db-mcp 后再连接 Claude Code。确保 `mcp.transport` 配置为 `http` 或 `sse`。
 
 ## Available MCP Tools
 
