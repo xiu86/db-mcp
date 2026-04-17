@@ -1,31 +1,84 @@
-# db-mcp default configuration
-# Database connection (required: user, password, database)
-# Can also be set via environment variables: DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
-database:
-  host: localhost
-  port: 3306
-  user: root
-  password: "your_password_here"
-  database: "your_database_here"
-  charset: utf8mb4
+# db-mcp Configuration Example
+# Copy this file to config.yaml and update with your settings
 
-# Connection pool
+# ============================================
+# Multi-Database Instance Configuration (v0.0.2+)
+# ============================================
+databases:
+  # MySQL instance
+  - type: mysql
+    name: default           # Instance name, referenced by "default" field
+    host: localhost
+    port: 3306
+    user: "your_mysql_user"
+    password: "your_mysql_password"
+    database: "your_mysql_database"
+    charset: utf8mb4
+
+  # MongoDB instance
+  - type: mongodb
+    name: mongo             # Another instance
+    host: localhost
+    port: 27017
+    user: "your_mongo_user"
+    password: "your_mongo_password"
+    database: "your_mongo_database"
+    # uri: "mongodb://user:password@host:port/database?authSource=admin"  # Optional: full connection URI
+
+# Default instance to use
+default: default
+
+# ============================================
+# Connection Pool
+# ============================================
 pool:
-  maxIdleConns: 10
-  maxOpenConns: 100
-  connMaxLifetime: 1h
-  connMaxIdleTime: 10m
+  maxIdleConns: 10          # Max idle connections per instance
+  maxOpenConns: 100        # Max open connections per instance
+  connMaxLifetime: 1h       # Connection max lifetime
+  connMaxIdleTime: 10m     # Connection max idle time
 
+# ============================================
 # Logging
+# ============================================
 log:
-  level: info
-  format: json
-  output: stdout
-  auditTable: _audit_logs      # deprecated, no longer used
-  auditFile: ./logs/audit.log  # audit log output file (JSON format)
+  level: info               # debug | info | warn | error
+  format: json              # json | text
+  output: stdout            # stdout | stderr | file path
+  auditFile: ./logs/audit.log  # Audit log output file (JSON format)
 
-# Rate limiting
+# ============================================
+# Rate Limiting
+# ============================================
 rateLimit:
   enabled: true
-  requests: 100
-  burst: 200
+  requests: 100             # Max requests per second
+  burst: 200               # Burst capacity
+
+# ============================================
+# Timeout Configuration (seconds)
+# ============================================
+timeout:
+  connect: 5                # Connection timeout
+  query: 30                # Query timeout
+  mutation: 10              # Insert/Update/Delete timeout
+  transaction: 60           # Transaction timeout
+
+# ============================================
+# MCP Server Transport (v0.0.3+)
+# ============================================
+mcp:
+  transport: stdio          # Transport mode: stdio | http | sse
+  host: "0.0.0.0"          # HTTP bind address
+  port: 8080               # HTTP listen port
+  endpointPath: "/mcp"     # HTTP endpoint path (for streamable-http)
+  tokens:                  # Bearer tokens for HTTP auth (empty = no auth)
+    - "your-secret-token-1"
+    # - "your-secret-token-2"
+
+# ============================================
+# Environment Variables (override config)
+# ============================================
+# Database: DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
+# Multi-DB: DB_INSTANCES, DB_<NAME>_HOST, DB_<NAME>_PORT, etc.
+# MCP: MCP_TRANSPORT, MCP_HOST, MCP_PORT, MCP_ENDPOINT_PATH, MCP_TOKEN
+# Pool: DB_POOL_MAX_IDLE, DB_POOL_MAX_OPEN, etc.
