@@ -84,10 +84,10 @@ databases:
     name: mongo
     host: localhost
     port: 27017
-    user: openIM
-    password: "openIM123"
-    database: "openim_v3"
-    uri: "mongodb://openIM:openIM123@localhost:37017/openim_v3?authSource=openim_v3"
+    user: "your-mongo-user"
+    password: "your-mongo-password"
+    database: "your-mongo-database"
+    uri: "mongodb://your-mongo-user:your-mongo-password@localhost:27017/your-mongo-database?authSource=your-mongo-database"
 
 default: default
 
