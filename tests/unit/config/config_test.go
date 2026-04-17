@@ -36,6 +36,13 @@ func TestDefaultConfig(t *testing.T) {
 	assert.True(t, cfg.RateLimit.Enabled)
 	assert.Equal(t, 100, cfg.RateLimit.Requests)
 	assert.Equal(t, 200, cfg.RateLimit.Burst)
+
+	// Check MCP settings
+	assert.Equal(t, "stdio", cfg.MCP.Transport)
+	assert.Equal(t, "0.0.0.0", cfg.MCP.Host)
+	assert.Equal(t, 8080, cfg.MCP.Port)
+	assert.Equal(t, "/mcp", cfg.MCP.EndpointPath)
+	assert.Empty(t, cfg.MCP.Tokens)
 }
 
 func TestLoadConfig_FileNotFound(t *testing.T) {
@@ -115,4 +122,57 @@ database:
 	assert.NoError(t, err)
 	assert.Equal(t, "oldhost", cfg.Databases[0].Host)
 	assert.Equal(t, "olduser", cfg.Databases[0].User)
+}
+
+func TestLoadConfig_MCPEnvOverride(t *testing.T) {
+	// Set MCP environment variables
+	os.Setenv("MCP_TRANSPORT", "http")
+	os.Setenv("MCP_HOST", "127.0.0.1")
+	os.Setenv("MCP_PORT", "9090")
+	os.Setenv("MCP_ENDPOINT_PATH", "/api/mcp")
+	os.Setenv("MCP_TOKEN", "token1,token2,token3")
+	defer func() {
+		os.Unsetenv("MCP_TRANSPORT")
+		os.Unsetenv("MCP_HOST")
+		os.Unsetenv("MCP_PORT")
+		os.Unsetenv("MCP_ENDPOINT_PATH")
+		os.Unsetenv("MCP_TOKEN")
+	}()
+
+	cfg, err := config.Load("")
+	assert.NoError(t, err)
+	assert.Equal(t, "http", cfg.MCP.Transport)
+	assert.Equal(t, "127.0.0.1", cfg.MCP.Host)
+	assert.Equal(t, 9090, cfg.MCP.Port)
+	assert.Equal(t, "/api/mcp", cfg.MCP.EndpointPath)
+	assert.Equal(t, []string{"token1", "token2", "token3"}, cfg.MCP.Tokens)
+}
+
+func TestLoadConfig_MCPYAMLConfig(t *testing.T) {
+	// Test MCP config from YAML
+	yamlContent := `
+mcp:
+  transport: sse
+  host: localhost
+  port: 3000
+  endpointPath: /sse
+  tokens:
+    - secret1
+    - secret2
+`
+	tmpFile, err := os.CreateTemp("", "config-mcp-*.yaml")
+	assert.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	_, err = tmpFile.WriteString(yamlContent)
+	assert.NoError(t, err)
+	tmpFile.Close()
+
+	cfg, err := config.Load(tmpFile.Name())
+	assert.NoError(t, err)
+	assert.Equal(t, "sse", cfg.MCP.Transport)
+	assert.Equal(t, "localhost", cfg.MCP.Host)
+	assert.Equal(t, 3000, cfg.MCP.Port)
+	assert.Equal(t, "/sse", cfg.MCP.EndpointPath)
+	assert.Equal(t, []string{"secret1", "secret2"}, cfg.MCP.Tokens)
 }

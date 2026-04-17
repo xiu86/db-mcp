@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"db-mcp/internal/config"
 	"db-mcp/internal/connection"
 	mcpserver "db-mcp/internal/mcp"
+	"db-mcp/internal/middleware"
 	"db-mcp/pkg/logger"
 
 	"github.com/mark3labs/mcp-go/server"
@@ -55,27 +57,48 @@ func main() {
 	// Create MCP server (this also initializes the audit service)
 	mcpSvc := mcpserver.NewMCPServer(connManager, cfg, log)
 
-	// Start server
+	// Determine transport mode
+	transport := cfg.MCP.Transport
+	if transport == "" {
+		transport = "stdio" // default
+	}
+
 	srv := mcpSvc.GetServer()
 
-	// Handle shutdown gracefully
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	switch transport {
+	case "http", "sse", "streamable-http":
+		// Create HTTP transport
+		auth := middleware.NewTokenAuth(cfg.MCP.Tokens)
+		httpTransport := mcpserver.NewHTTPTransport(srv, &cfg.MCP, auth)
 
-	// Start stdio server in a goroutine so we can listen for signals
-	go func() {
-		log.Info("Starting MCP server on stdio")
+		// Graceful shutdown
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+		go func() {
+			<-sigChan
+			cancel()
+		}()
+
+		go func() {
+			if err := httpTransport.Start(log); err != nil && err != http.ErrServerClosed {
+				log.Error("HTTP server error", "error", err)
+			}
+		}()
+
+		<-ctx.Done()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+		httpTransport.Shutdown(shutdownCtx)
+
+	default: // "stdio"
+		log.Info("Starting MCP server in stdio mode")
 		if err := server.ServeStdio(srv); err != nil {
-			log.Error("Server error", "error", err)
+			log.Error("Stdio server error", "error", err)
 		}
-		// Signal main when stdio server exits (e.g., client disconnects)
-		sigChan <- syscall.SIGTERM
-	}()
-
-	// Wait for signal
-	<-sigChan
-
-	log.Info("Shutting down server...")
+	}
 
 	// Close MCP server (flushes audit log, etc.)
 	if err := mcpSvc.Close(); err != nil {
@@ -92,10 +115,4 @@ func main() {
 	// Give a moment for cleanup
 	time.Sleep(100 * time.Millisecond)
 	log.Info("Server stopped")
-}
-
-// HTTPHandler returns an HTTP handler for the MCP server (optional)
-func HTTPHandler(cm *connection.ConnectionManager, cfg *config.Config, log *logger.Logger) http.Handler {
-	_ = mcpserver.NewMCPServer(cm, cfg, log) // MCP server for HTTP transport
-	return nil                                // SSE handler would be implemented here
 }

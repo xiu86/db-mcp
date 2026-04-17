@@ -21,7 +21,7 @@
 - Go 1.26+
 - GORM（MySQL）
 - mongo-go-driver（MongoDB）
-- [mark3labs/mcp-go](https://github.com/mark3labs/mcp-go)
+- [mark3labs/mcp-go](https://github.com/mark3labs/mcp-go) (MCP server with StreamableHTTPServer/SSEServer support)
 
 ## Repository Structure
 
@@ -209,7 +209,55 @@ claude mcp list
 claude mcp get db-mcp
 ```
 
+## HTTP/SSE Transport Mode
+
+db-mcp supports HTTP and SSE (Server-Sent Events) transport besides stdio.
+
+### Configuration
+
+```yaml
+mcp:
+  transport: http          # "stdio" | "http" | "sse"
+  host: "0.0.0.0"          # Listen address
+  port: 8080               # Listen port
+  endpointPath: "/mcp"     # HTTP endpoint
+  tokens:                  # Bearer tokens for auth
+    - "your-token"
+```
+
+### Environment Variables
+
+```bash
+export MCP_TRANSPORT=http
+export MCP_HOST=0.0.0.0
+export MCP_PORT=8080
+export MCP_ENDPOINT_PATH=/mcp
+export MCP_TOKEN=your-token,another-token
+```
+
+### Usage with HTTP
+
+```bash
+# With auth
+curl -H "Authorization: Bearer <token>" http://localhost:8080/mcp \
+  -X POST -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+
+# SSE endpoint
+curl -H "Authorization: Bearer <token>" http://localhost:8080/sse
+```
+
+### Claude Code HTTP Mode
+
+```bash
+claude mcp add db-mcp -- /path/to/db-mcp/bin/db-mcp
+```
+
+Set env vars before running, or configure via config.yaml.
+
 ## Available MCP Tools
+
+> All tools are available via both stdio and HTTP/SSE transports.
 
 ### `db_query`
 

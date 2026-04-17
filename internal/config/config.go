@@ -68,8 +68,11 @@ type MongoConfig struct {
 }
 
 type MCPConfig struct {
-    Host string `yaml:"host" json:"host"`
-    Port int    `yaml:"port" json:"port"`
+    Transport    string   `yaml:"transport" json:"transport"`       // "stdio" | "http" | "sse", default "stdio"
+    Host         string   `yaml:"host" json:"host"`                 // HTTP listen address, default "0.0.0.0"
+    Port         int      `yaml:"port" json:"port"`                 // HTTP listen port, default 8080
+    EndpointPath string   `yaml:"endpointPath" json:"endpointPath"` // HTTP endpoint path, default "/mcp"
+    Tokens       []string `yaml:"tokens" json:"tokens"`             // Auth tokens
 }
 
 type LogConfig struct {
@@ -131,6 +134,13 @@ func DefaultConfig() *Config {
             Query:       30,
             Mutation:    10,
             Transaction: 60,
+        },
+        MCP: MCPConfig{
+            Transport:    "stdio",
+            Host:         "0.0.0.0",
+            Port:         8080,
+            EndpointPath: "/mcp",
+            Tokens:       []string{},
         },
     }
 }
@@ -242,6 +252,25 @@ func Load(configPath string) (*Config, error) {
     if cfg.Default == "" || !instanceExists(cfg.Databases, cfg.Default) {
         // Default to first instance if none specified or doesn't exist
         cfg.Default = cfg.Databases[0].Name
+    }
+
+    // MCP环境变量覆盖
+    if v := os.Getenv("MCP_TRANSPORT"); v != "" {
+        cfg.MCP.Transport = v
+    }
+    if v := os.Getenv("MCP_HOST"); v != "" {
+        cfg.MCP.Host = v
+    }
+    if v := os.Getenv("MCP_PORT"); v != "" {
+        if port, err := strconv.Atoi(v); err == nil {
+            cfg.MCP.Port = port
+        }
+    }
+    if v := os.Getenv("MCP_ENDPOINT_PATH"); v != "" {
+        cfg.MCP.EndpointPath = v
+    }
+    if v := os.Getenv("MCP_TOKEN"); v != "" {
+        cfg.MCP.Tokens = splitByComma(v)
     }
 
     return cfg, nil
