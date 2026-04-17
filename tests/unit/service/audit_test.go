@@ -23,13 +23,12 @@ func TestAuditContext(t *testing.T) {
 }
 
 func TestNewAuditService(t *testing.T) {
-	svc := service.NewAuditService(nil, "_audit_logs")
+	svc := service.NewAuditService("")
 	assert.NotNil(t, svc)
-	assert.Equal(t, "_audit_logs", svc.Table)
 }
 
 func TestAuditService_Start(t *testing.T) {
-	svc := service.NewAuditService(nil, "_audit_logs")
+	svc := service.NewAuditService("")
 	ctx := svc.Start("SELECT", "users", "1")
 
 	assert.NotEmpty(t, ctx.RequestID)

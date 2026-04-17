@@ -3,6 +3,7 @@ package connection
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"time"
 
 	"db-mcp/internal/config"
@@ -62,9 +63,12 @@ func (m *ConnectionManager) HealthCheck() error {
 }
 
 func BuildDSN(cfg *config.DatabaseConfig) string {
+	// URL-encode user and password to handle special characters safely
+	escapedUser := url.QueryEscape(cfg.User)
+	escapedPassword := url.QueryEscape(cfg.Password)
 	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
-		cfg.User,
-		cfg.Password,
+		escapedUser,
+		escapedPassword,
 		cfg.Host,
 		cfg.Port,
 		cfg.Database,

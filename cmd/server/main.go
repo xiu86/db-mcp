@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"net/http"
@@ -45,42 +44,55 @@ func main() {
 		log.Error("Failed to connect to database", "error", err)
 		os.Exit(1)
 	}
-	defer connManager.Close()
 
 	// Health check
 	if err := connManager.HealthCheck(); err != nil {
 		log.Error("Database health check failed", "error", err)
+		connManager.Close()
 		os.Exit(1)
 	}
 	log.Info("Database connection established")
 
-	// Create MCP server
+	// Create MCP server (this also initializes the audit service)
 	mcpSvc := mcpserver.NewMCPServer(connManager.DB(), cfg, log)
 
 	// Start server
 	srv := mcpSvc.GetServer()
 
 	// Handle shutdown gracefully
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start stdio server in a goroutine so we can listen for signals
 	go func() {
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-		<-sigChan
-
-		log.Info("Shutting down server...")
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		_ = ctx
-		log.Info("Server stopped")
-		os.Exit(0)
+		log.Info("Starting MCP server on stdio")
+		if err := server.ServeStdio(srv); err != nil {
+			log.Error("Server error", "error", err)
+		}
+		// Signal main when stdio server exits (e.g., client disconnects)
+		sigChan <- syscall.SIGTERM
 	}()
 
-	// Start stdio server
-	log.Info("Starting MCP server on stdio")
-	if err := server.ServeStdio(srv); err != nil {
-		log.Error("Server error", "error", err)
-		os.Exit(1)
+	// Wait for signal
+	<-sigChan
+
+	log.Info("Shutting down server...")
+
+	// Close MCP server (flushes audit log, etc.)
+	if err := mcpSvc.Close(); err != nil {
+		log.Error("Failed to close MCP server", "error", err)
 	}
+
+	// Close database connection (flushes buffers, closes connections)
+	if err := connManager.Close(); err != nil {
+		log.Error("Failed to close database connection", "error", err)
+	} else {
+		log.Info("Database connection closed")
+	}
+
+	// Give a moment for cleanup
+	time.Sleep(100 * time.Millisecond)
+	log.Info("Server stopped")
 }
 
 // HTTPHandler returns an HTTP handler for the MCP server (optional)

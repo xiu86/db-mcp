@@ -1,0 +1,31 @@
+# db-mcp default configuration
+# Database connection (required: user, password, database)
+# Can also be set via environment variables: DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
+database:
+  host: localhost
+  port: 3306
+  user: root
+  password: "your_password_here"
+  database: "your_database_here"
+  charset: utf8mb4
+
+# Connection pool
+pool:
+  maxIdleConns: 10
+  maxOpenConns: 100
+  connMaxLifetime: 1h
+  connMaxIdleTime: 10m
+
+# Logging
+log:
+  level: info
+  format: json
+  output: stdout
+  auditTable: _audit_logs      # deprecated, no longer used
+  auditFile: ./logs/audit.log  # audit log output file (JSON format)
+
+# Rate limiting
+rateLimit:
+  enabled: true
+  requests: 100
+  burst: 200

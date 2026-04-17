@@ -3,6 +3,7 @@ package detector
 import (
 	"regexp"
 	"strings"
+	"time"
 )
 
 type DeleteFieldDetector struct {
@@ -38,8 +39,22 @@ var typeBasedValues = map[string]string{
 	"int":       "1",
 	"bigint":    "1",
 	"boolean":   "1",
-	"timestamp": "0000-00-00 00:00:00",
-	"datetime":  "0000-00-00 00:00:00",
+	"timestamp": "__CURRENT_TIMESTAMP__",
+	"datetime":  "__CURRENT_TIMESTAMP__",
+}
+
+// CurrentTimestampMarker is the sentinel value used to indicate that a datetime/timestamp
+// field should be set to the current time rather than a static value.
+const CurrentTimestampMarker = "__CURRENT_TIMESTAMP__"
+
+// IsCurrentTimestampMarker returns true if the value indicates "use current time".
+func IsCurrentTimestampMarker(value string) bool {
+	return value == CurrentTimestampMarker
+}
+
+// GetCurrentTimestamp returns the current timestamp in a format suitable for database insertion.
+func GetCurrentTimestamp() interface{} {
+	return time.Now().Format("2006-01-02 15:04:05")
 }
 
 type ColumnInfo struct {

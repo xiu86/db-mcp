@@ -1,84 +1,186 @@
 # db-mcp
 
-MySQL 数据库 MCP (Model Context Protocol) 服务，基于 mark3labs/mcp-go SDK 和 GORM 实现。
+一个基于 Go、GORM 和 `mark3labs/mcp-go` 的 MySQL MCP (Model Context Protocol) Server，用于通过 Claude Code 等 MCP Client 以结构化工具方式安全访问数据库。
 
-## 功能特性
+## Features
 
-- **基础 CRUD 操作**: 查询、插入、更新、逻辑删除
-- **高级操作**: JOIN 查询、批量操作、事务支持
-- **逻辑删除自动检测**: 支持字段名模式、COMMENT 语义、类型值映射
-- **详细审计日志**: 完整操作记录，支持数据恢复扩展
-- **限流/超时控制**: 保护数据库资源
-- **连接池管理**: 可配置的连接池参数
+- 支持常见数据库工具：`db_query`、`db_insert`、`db_update`、`db_delete`
+- 支持批量操作：`db_batch_insert`、`db_batch_update`、`db_batch_delete`
+- 支持多表 JOIN 查询：`db_join`
+- 支持事务执行：`db_transaction`
+- 支持表结构查看：`db_describe`
+- 自动检测逻辑删除字段
+- 内置审计日志输出
+- 支持限流、查询超时和连接池配置
+- 默认使用 stdio，可直接接入 Claude Code MCP Server
 
-## 安装
+## Tech Stack
 
-```bash
-go get db-mcp
+- Go 1.26+
+- GORM
+- MySQL Driver
+- [mark3labs/mcp-go](https://github.com/mark3labs/mcp-go)
+
+## Repository Structure
+
+```text
+db-mcp/
+├── cmd/server/            # 服务入口
+├── internal/config/       # 配置加载
+├── internal/connection/   # 数据库连接管理
+├── internal/detector/     # 逻辑删除字段检测
+├── internal/mcp/          # MCP 工具注册与处理
+├── internal/middleware/   # 限流与超时控制
+├── internal/repository/   # 数据访问层
+├── internal/service/      # CRUD / 审计 / 事务服务
+├── pkg/logger/            # 日志组件
+├── tests/                 # 单元测试与集成测试
+├── config.yaml            # 默认配置文件
+└── README.md
 ```
 
-## 配置
+## Requirements
 
-### 配置文件 (config.yaml)
+- Go 1.26 或更高版本
+- MySQL 5.7+/8.0+
+- 可访问目标数据库的账号
+
+## Quick Start
+
+### 1. Clone and build
+
+```bash
+git clone <your-repo-url>
+cd db-mcp
+make build
+```
+
+生成的二进制位于：
+
+```bash
+./bin/db-mcp
+```
+
+### 2. Configure database connection
+
+项目默认读取根目录 `config.yaml`。
 
 ```yaml
 database:
   host: localhost
   port: 3306
   user: root
-  password: secret
-  database: mydb
+  password: "your-password"
+  database: "your-database"
   charset: utf8mb4
 
 pool:
-  max_idle_conns: 10
-  max_open_conns: 100
-  conn_max_lifetime: 1h
-  conn_max_idle_time: 10m
+  maxIdleConns: 10
+  maxOpenConns: 100
+  connMaxLifetime: 1h
+  connMaxIdleTime: 10m
 
 log:
   level: info
   format: json
   output: stdout
+  auditFile: ./logs/audit.log
 
-rate_limit:
+rateLimit:
   enabled: true
-  requests_per_second: 100
+  requests: 100
   burst: 200
 
 timeout:
-  query: 30s
-  write: 60s
-  transaction: 120s
+  connect: 5
+  query: 30
+  mutation: 10
+  transaction: 60
 ```
 
-### 环境变量覆盖
-
-所有配置项都支持环境变量覆盖，格式为 `DB_MCP_<SECTION>_<KEY>`：
+也可以通过环境变量覆盖：
 
 ```bash
-export DB_MCP_DATABASE_HOST=localhost
-export DB_MCP_DATABASE_PORT=3306
-export DB_MCP_DATABASE_USER=root
-export DB_MCP_DATABASE_PASSWORD=secret
-export DB_MCP_DATABASE_DATABASE=mydb
+export DB_HOST=localhost
+export DB_PORT=3306
+export DB_USER=root
+export DB_PASSWORD=your-password
+export DB_NAME=your-database
 ```
 
-## 运行
+> `user`、`password`、`database` 为必填项；若未提供，程序会在启动时失败。
+
+### 3. Run the server
 
 ```bash
 # 使用默认配置文件 config.yaml
-./db-mcp
+./bin/db-mcp
 
 # 指定配置文件
-./db-mcp -config /path/to/config.yaml
+./bin/db-mcp -config /absolute/path/to/config.yaml
 ```
 
-## MCP 工具
+服务入口见 `cmd/server/main.go:26`。
 
-### db_query
+## Use with Claude Code
 
-查询数据
+`db-mcp` 使用 stdio 传输，可直接注册为 Claude Code 的 MCP Server。
+
+### Option 1: Add via CLI
+
+```bash
+# 当前项目
+claude mcp add db-mcp -- /absolute/path/to/db-mcp/bin/db-mcp
+
+# 用户级配置
+claude mcp add --scope user db-mcp -- /absolute/path/to/db-mcp/bin/db-mcp
+```
+
+如果配置文件不在项目根目录，可通过包装脚本传入：
+
+```bash
+#!/bin/bash
+export DB_HOST=localhost
+export DB_PORT=3306
+export DB_USER=root
+export DB_PASSWORD=your-password
+export DB_NAME=your-database
+exec /absolute/path/to/db-mcp/bin/db-mcp
+```
+
+然后注册脚本：
+
+```bash
+claude mcp add db-mcp -- /absolute/path/to/db-mcp-wrapper.sh
+```
+
+### Option 2: Configure in settings
+
+在 `.claude/settings.json` 或全局配置中添加：
+
+```json
+{
+  "mcpServers": {
+    "db-mcp": {
+      "command": "/absolute/path/to/db-mcp/bin/db-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+### Verify
+
+```bash
+claude mcp list
+claude mcp get db-mcp
+```
+
+## Available MCP Tools
+
+### `db_query`
+
+查询表数据。
 
 ```json
 {
@@ -91,9 +193,9 @@ export DB_MCP_DATABASE_DATABASE=mydb
 }
 ```
 
-### db_insert
+### `db_insert`
 
-插入数据
+插入单条数据。
 
 ```json
 {
@@ -102,9 +204,9 @@ export DB_MCP_DATABASE_DATABASE=mydb
 }
 ```
 
-### db_update
+### `db_update`
 
-更新数据
+更新数据。
 
 ```json
 {
@@ -114,9 +216,9 @@ export DB_MCP_DATABASE_DATABASE=mydb
 }
 ```
 
-### db_delete
+### `db_delete`
 
-逻辑删除（自动检测删除字段）
+执行逻辑删除。
 
 ```json
 {
@@ -125,9 +227,9 @@ export DB_MCP_DATABASE_DATABASE=mydb
 }
 ```
 
-### db_batch_insert
+### `db_batch_insert`
 
-批量插入
+批量插入数据。
 
 ```json
 {
@@ -139,9 +241,9 @@ export DB_MCP_DATABASE_DATABASE=mydb
 }
 ```
 
-### db_batch_update
+### `db_batch_update`
 
-批量更新
+按主键字段批量更新。
 
 ```json
 {
@@ -154,9 +256,9 @@ export DB_MCP_DATABASE_DATABASE=mydb
 }
 ```
 
-### db_batch_delete
+### `db_batch_delete`
 
-批量逻辑删除
+按 ID 批量逻辑删除。
 
 ```json
 {
@@ -166,9 +268,9 @@ export DB_MCP_DATABASE_DATABASE=mydb
 }
 ```
 
-### db_join
+### `db_join`
 
-JOIN 查询
+执行多表 JOIN 查询。
 
 ```json
 {
@@ -191,9 +293,9 @@ JOIN 查询
 }
 ```
 
-### db_transaction
+### `db_transaction`
 
-事务操作
+在单个事务中执行多个操作。
 
 ```json
 {
@@ -204,20 +306,28 @@ JOIN 查询
 }
 ```
 
-## 逻辑删除字段检测
+### `db_describe`
 
-系统自动检测以下模式的删除字段：
+查看表结构和检测到的逻辑删除字段。
 
-### 字段名模式
-- `deleted_at`, `deleted_time`, `delete_time`
-- `is_deleted`, `is_del`, `deleted`
-- `del_flag`, `delete_flag`
+```json
+{
+  "table": "users"
+}
+```
 
-### COMMENT 关键字
-- 包含 "删除"、"逻辑删除"、"软删除"
-- 包含 "是否删除" 格式（如 "是否删除：0.否，1.是"）
+工具注册位置见 `internal/mcp/tools.go:114`。
 
-### 示例
+## Logical Delete Detection
+
+系统会自动识别常见逻辑删除字段，例如：
+
+- 字段名：`deleted_at`、`deleted_time`、`delete_time`
+- 布尔/标记字段：`is_deleted`、`is_del`、`deleted`
+- 标志字段：`del_flag`、`delete_flag`
+- 字段注释包含：`删除`、`逻辑删除`、`软删除`、`是否删除`
+
+示例：
 
 ```sql
 CREATE TABLE users (
@@ -228,86 +338,71 @@ CREATE TABLE users (
 );
 ```
 
-系统将自动识别 `is_del` 和 `deleted_time` 为删除字段。
+## Audit Logging
 
-## 审计日志
+所有数据库操作都会记录审计日志到文件，默认路径为 `audit.log`，可通过 `log.auditFile` 配置。
 
-所有操作自动记录审计日志：
+示例记录：
 
 ```json
 {
-  "id": 1,
-  "timestamp": "2024-01-01T00:00:00Z",
+  "timestamp": "2024-01-01T00:00:00+08:00",
   "operation": "update",
   "table": "users",
   "record_id": "1",
-  "actor": "system",
   "request_id": "20240101000000-abc12345",
+  "sql": "UPDATE `users` SET `name` = ? WHERE (id = ?)",
   "before_data": "{\"name\":\"John\"}",
   "after_data": "{\"name\":\"John Doe\"}",
-  "duration": 15,
-  "status": "success"
+  "duration_ms": 15,
+  "status": "success",
+  "error_msg": ""
 }
 ```
 
-## 测试
+## Development
+
+### Build
 
 ```bash
-# 运行所有测试
-go test ./...
-
-# 运行单元测试
-go test ./tests/unit/...
-
-# 运行集成测试
-go test ./tests/integration/... -tags=integration
-
-# 测试覆盖率
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out
+make build
 ```
 
-## 项目结构
+### Test
 
-```
-db-mcp/
-├── cmd/
-│   └── server/
-│       └── main.go          # 服务入口
-├── internal/
-│   ├── config/              # 配置管理
-│   ├── connection/          # 数据库连接
-│   ├── detector/            # 删除字段检测
-│   ├── errors/              # 错误处理
-│   ├── mcp/                 # MCP 工具定义
-│   ├── middleware/          # 限流/超时中间件
-│   ├── repository/          # 数据访问层
-│   └── service/             # 业务逻辑层
-├── pkg/
-│   └── logger/              # 日志组件
-├── tests/
-│   ├── unit/                # 单元测试
-│   └── integration/         # 集成测试
-├── docs/
-│   └── superpowers/
-│       ├── specs/           # 设计文档
-│       └── plans/           # 实现计划
-├── config.yaml              # 默认配置
-├── go.mod
-└── README.md
+```bash
+# 全量测试
+make test
+
+# 单元测试
+make test-unit
+
+# 集成测试
+make test-integration
+
+# 覆盖率报告
+make test
+make test-coverage
 ```
 
-## 验收标准
+对应命令定义见 `Makefile:3`。
 
-### 功能验收
-- [x] 支持基础 CRUD 操作
-- [x] 支持 JOIN 查询
-- [x] 支持批量操作
-- [x] 支持事务
-- [x] 逻辑删除自动检测
-- [x] 审计日志记录
+## Security Notes
 
-### 非功能验收
+- 请使用最小权限数据库账号，避免直接使用高权限生产账号
+- `config.yaml` 可能包含敏感凭据，不应提交真实生产密码
+- 建议将审计日志目录加入部署运维规范，防止日志丢失
+
+## Roadmap Ideas
+
+- 支持更多数据库类型
+- 提供 HTTP/SSE 传输模式
+- 增强更细粒度的权限控制与审计检索能力
+
+## License
+
+如需开源发布，请在仓库中补充 License 文件并在此处声明。
+
 - [x] 限流控制
 - [x] 超时控制
 - [x] 连接池管理

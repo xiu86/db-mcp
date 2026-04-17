@@ -8,13 +8,12 @@ import (
 )
 
 func TestNewAuditService(t *testing.T) {
-	audit := NewAuditService(nil, "test_audit")
+	audit := NewAuditService("")
 	assert.NotNil(t, audit)
-	assert.Equal(t, "test_audit", audit.Table)
 }
 
 func TestAuditService_Start(t *testing.T) {
-	audit := NewAuditService(nil, "test_audit")
+	audit := NewAuditService("")
 	ctx := audit.Start("query", "users", "1")
 
 	assert.NotNil(t, ctx)
@@ -26,7 +25,7 @@ func TestAuditService_Start(t *testing.T) {
 }
 
 func TestAuditService_Start_EmptyRecordID(t *testing.T) {
-	audit := NewAuditService(nil, "test_audit")
+	audit := NewAuditService("")
 	ctx := audit.Start("query", "users", "")
 
 	assert.NotNil(t, ctx)
@@ -34,7 +33,7 @@ func TestAuditService_Start_EmptyRecordID(t *testing.T) {
 }
 
 func TestAuditService_Success(t *testing.T) {
-	audit := NewAuditService(nil, "test_audit")
+	audit := NewAuditService("")
 	ctx := audit.Start("insert", "users", "1")
 
 	before := map[string]interface{}{"name": "old"}
@@ -45,7 +44,7 @@ func TestAuditService_Success(t *testing.T) {
 }
 
 func TestAuditService_Success_NilData(t *testing.T) {
-	audit := NewAuditService(nil, "test_audit")
+	audit := NewAuditService("")
 	ctx := audit.Start("delete", "users", "1")
 
 	// Should not panic with nil data
@@ -53,7 +52,7 @@ func TestAuditService_Success_NilData(t *testing.T) {
 }
 
 func TestAuditService_Fail(t *testing.T) {
-	audit := NewAuditService(nil, "test_audit")
+	audit := NewAuditService("")
 	ctx := audit.Start("update", "users", "1")
 
 	// Should not panic
@@ -61,7 +60,7 @@ func TestAuditService_Fail(t *testing.T) {
 }
 
 func TestAuditService_Fail_EmptyMessage(t *testing.T) {
-	audit := NewAuditService(nil, "test_audit")
+	audit := NewAuditService("")
 	ctx := audit.Start("query", "users", "1")
 
 	// Should not panic with empty message

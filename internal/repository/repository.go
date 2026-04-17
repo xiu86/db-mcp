@@ -3,6 +3,8 @@ package repository
 import (
     "db-mcp/internal/detector"
     "db-mcp/internal/errors"
+    "db-mcp/internal/sanitizer"
+    "fmt"
 
     "gorm.io/gorm"
 )
@@ -127,6 +129,10 @@ func New(db *gorm.DB) *Repository {
 }
 
 func (r *Repository) Query(req *QueryRequest) (*QueryResult, error) {
+    if err := sanitizer.ValidateTableName(req.Table); err != nil {
+        return nil, err
+    }
+
     var rows []map[string]interface{}
 
     query := r.db.Table(req.Table)
@@ -136,11 +142,11 @@ func (r *Repository) Query(req *QueryRequest) (*QueryResult, error) {
     }
 
     for _, order := range req.Order {
-        dir := "ASC"
-        if order.Direction == "desc" {
-            dir = "DESC"
+        safeOrder, err := sanitizer.SanitizeOrderField(order.Field, order.Direction)
+        if err != nil {
+            return nil, err
         }
-        query = query.Order(order.Field + " " + dir)
+        query = query.Order(safeOrder)
     }
 
     if req.Limit > 0 {
@@ -152,7 +158,10 @@ func (r *Repository) Query(req *QueryRequest) (*QueryResult, error) {
 
     fields := "*"
     if len(req.Fields) > 0 {
-        fields = joinFields(req.Fields)
+        if err := sanitizer.ValidateFieldList(req.Fields); err != nil {
+            return nil, err
+        }
+        fields = sanitizer.QuoteFieldList(req.Fields)
     }
 
     err := query.Select(fields).Find(&rows).Error
@@ -167,6 +176,10 @@ func (r *Repository) Query(req *QueryRequest) (*QueryResult, error) {
 }
 
 func (r *Repository) Insert(req *InsertRequest) (*MutationResult, error) {
+    if err := sanitizer.ValidateTableName(req.Table); err != nil {
+        return nil, err
+    }
+
     err := r.db.Table(req.Table).Create(req.Data).Error
     if err != nil {
         return nil, errors.WrapGormError(err)
@@ -180,6 +193,10 @@ func (r *Repository) Insert(req *InsertRequest) (*MutationResult, error) {
 }
 
 func (r *Repository) Update(req *UpdateRequest) (*MutationResult, error) {
+    if err := sanitizer.ValidateTableName(req.Table); err != nil {
+        return nil, err
+    }
+
     result := r.db.Table(req.Table).Where(req.Where).Updates(req.Data)
     if result.Error != nil {
         return nil, errors.WrapGormError(result.Error)
@@ -192,13 +209,20 @@ func (r *Repository) Update(req *UpdateRequest) (*MutationResult, error) {
 }
 
 func (r *Repository) LogicalDelete(req *DeleteRequest) (*MutationResult, error) {
+    if err := sanitizer.ValidateTableName(req.Table); err != nil {
+        return nil, err
+    }
     if req.DeleteField == nil || len(req.DeleteField.Fields) == 0 {
         return nil, errors.NewError(errors.ErrInvalidInput, "no delete field detected", nil)
     }
 
     updates := make(map[string]interface{})
     for _, field := range req.DeleteField.Fields {
-        updates[field.Name] = field.TrueValue
+        if field.TrueValue == detector.CurrentTimestampMarker {
+            updates[field.Name] = detector.GetCurrentTimestamp()
+        } else {
+            updates[field.Name] = field.TrueValue
+        }
     }
 
     result := r.db.Table(req.Table).Where(req.Where).Updates(updates)
@@ -213,6 +237,10 @@ func (r *Repository) LogicalDelete(req *DeleteRequest) (*MutationResult, error) 
 }
 
 func (r *Repository) BatchInsert(req *BatchInsertRequest) (*BatchResult, error) {
+    if err := sanitizer.ValidateTableName(req.Table); err != nil {
+        return nil, err
+    }
+
     var successCount, failedCount int64
     var batchErrors []BatchError
 
@@ -234,6 +262,10 @@ func (r *Repository) BatchInsert(req *BatchInsertRequest) (*BatchResult, error) 
 }
 
 func (r *Repository) BatchUpdate(req *BatchUpdateRequest) (*BatchResult, error) {
+    if err := sanitizer.ValidateTableName(req.Table); err != nil {
+        return nil, err
+    }
+
     var successCount, failedCount int64
     var batchErrors []BatchError
 
@@ -241,6 +273,12 @@ func (r *Repository) BatchUpdate(req *BatchUpdateRequest) (*BatchResult, error) 
     if keyField == "" {
         keyField = "id"
     }
+
+    if err := sanitizer.ValidateFieldName(keyField); err != nil {
+        return nil, errors.NewError(errors.ErrInvalidInput,
+            fmt.Sprintf("invalid key field: %s", keyField), err)
+    }
+    safeKeyField := sanitizer.QuoteIdentifier(keyField)
 
     for i, data := range req.Data {
         keyValue := data[keyField]
@@ -251,7 +289,7 @@ func (r *Repository) BatchUpdate(req *BatchUpdateRequest) (*BatchResult, error) 
         }
 
         delete(data, keyField)
-        result := r.db.Table(req.Table).Where(keyField+" = ?", keyValue).Updates(data)
+        result := r.db.Table(req.Table).Where(safeKeyField+" = ?", keyValue).Updates(data)
         if result.Error != nil {
             failedCount++
             batchErrors = append(batchErrors, BatchError{Index: i, Message: result.Error.Error()})
@@ -268,6 +306,9 @@ func (r *Repository) BatchUpdate(req *BatchUpdateRequest) (*BatchResult, error) 
 }
 
 func (r *Repository) BatchLogicalDelete(req *BatchDeleteRequest) (*BatchResult, error) {
+    if err := sanitizer.ValidateTableName(req.Table); err != nil {
+        return nil, err
+    }
     if req.DeleteField == nil || len(req.DeleteField.Fields) == 0 {
         return nil, errors.NewError(errors.ErrInvalidInput, "no delete field detected", nil)
     }
@@ -280,13 +321,23 @@ func (r *Repository) BatchLogicalDelete(req *BatchDeleteRequest) (*BatchResult, 
         idField = "id"
     }
 
+    if err := sanitizer.ValidateFieldName(idField); err != nil {
+        return nil, errors.NewError(errors.ErrInvalidInput,
+            fmt.Sprintf("invalid id field: %s", idField), err)
+    }
+    safeIDField := sanitizer.QuoteIdentifier(idField)
+
     updates := make(map[string]interface{})
     for _, field := range req.DeleteField.Fields {
-        updates[field.Name] = field.TrueValue
+        if field.TrueValue == detector.CurrentTimestampMarker {
+            updates[field.Name] = detector.GetCurrentTimestamp()
+        } else {
+            updates[field.Name] = field.TrueValue
+        }
     }
 
     for i, id := range req.IDs {
-        result := r.db.Table(req.Table).Where(idField+" = ?", id).Updates(updates)
+        result := r.db.Table(req.Table).Where(safeIDField+" = ?", id).Updates(updates)
         if result.Error != nil {
             failedCount++
             batchErrors = append(batchErrors, BatchError{Index: i, Message: result.Error.Error()})
@@ -306,11 +357,49 @@ func (r *Repository) JoinQuery(req *JoinRequest) (*QueryResult, error) {
     if len(req.Tables) < 2 {
         return nil, errors.NewError(errors.ErrInvalidInput, "at least 2 tables required for join", nil)
     }
+    if len(req.Tables) > 5 {
+        return nil, errors.NewError(errors.ErrInvalidInput, "join exceeds maximum of 5 tables", nil)
+    }
+
+    // Validate all table names and aliases
+    for i, tbl := range req.Tables {
+        if err := sanitizer.ValidateTableName(tbl.Name); err != nil {
+            return nil, errors.NewError(errors.ErrInvalidInput,
+                fmt.Sprintf("invalid table name at index %d: %s", i, tbl.Name), err)
+        }
+        if err := sanitizer.ValidateAlias(tbl.Alias); err != nil {
+            return nil, errors.NewError(errors.ErrInvalidInput,
+                fmt.Sprintf("invalid alias at index %d: %s", i, tbl.Alias), err)
+        }
+    }
 
     table0 := req.Tables[0]
-    query := r.db.Table(table0.Name + " AS " + table0.Alias)
+    query := r.db.Table(
+        sanitizer.QuoteIdentifier(table0.Name) + " AS " + sanitizer.QuoteIdentifier(table0.Alias),
+    )
 
-    for _, join := range req.Joins {
+    for i, join := range req.Joins {
+        if err := sanitizer.ValidateJoinType(join.Type); err != nil {
+            return nil, errors.NewError(errors.ErrInvalidInput,
+                fmt.Sprintf("invalid join type at index %d: %s", i, join.Type), err)
+        }
+        if err := sanitizer.ValidateAlias(join.FromTable); err != nil {
+            return nil, errors.NewError(errors.ErrInvalidInput,
+                fmt.Sprintf("invalid from table alias at join index %d: %s", i, join.FromTable), err)
+        }
+        if err := sanitizer.ValidateColumnName(join.FromField); err != nil {
+            return nil, errors.NewError(errors.ErrInvalidInput,
+                fmt.Sprintf("invalid from field at join index %d: %s", i, join.FromField), err)
+        }
+        if err := sanitizer.ValidateAlias(join.ToTable); err != nil {
+            return nil, errors.NewError(errors.ErrInvalidInput,
+                fmt.Sprintf("invalid to table alias at join index %d: %s", i, join.ToTable), err)
+        }
+        if err := sanitizer.ValidateColumnName(join.ToField); err != nil {
+            return nil, errors.NewError(errors.ErrInvalidInput,
+                fmt.Sprintf("invalid to field at join index %d: %s", i, join.ToField), err)
+        }
+
         joinType := "INNER JOIN"
         switch join.Type {
         case "left":
@@ -318,9 +407,15 @@ func (r *Repository) JoinQuery(req *JoinRequest) (*QueryResult, error) {
         case "right":
             joinType = "RIGHT JOIN"
         }
-        query = query.Joins(joinType + " " + join.ToTable + " ON " +
-            join.FromTable+"."+join.FromField+" = "+
-            join.ToTable+"."+join.ToField)
+
+        query = query.Joins(fmt.Sprintf("%s %s ON %s.%s = %s.%s",
+            joinType,
+            sanitizer.QuoteIdentifier(join.ToTable),
+            sanitizer.QuoteIdentifier(join.FromTable),
+            sanitizer.QuoteIdentifier(join.FromField),
+            sanitizer.QuoteIdentifier(join.ToTable),
+            sanitizer.QuoteIdentifier(join.ToField),
+        ))
     }
 
     if len(req.Where) > 0 {
@@ -328,11 +423,11 @@ func (r *Repository) JoinQuery(req *JoinRequest) (*QueryResult, error) {
     }
 
     for _, order := range req.Order {
-        dir := "ASC"
-        if order.Direction == "desc" {
-            dir = "DESC"
+        safeOrder, err := sanitizer.SanitizeOrderField(order.Field, order.Direction)
+        if err != nil {
+            return nil, err
         }
-        query = query.Order(order.Field + " " + dir)
+        query = query.Order(safeOrder)
     }
 
     if req.Limit > 0 {
@@ -341,7 +436,10 @@ func (r *Repository) JoinQuery(req *JoinRequest) (*QueryResult, error) {
 
     fields := "*"
     if len(req.Fields) > 0 {
-        fields = joinFields(req.Fields)
+        if err := sanitizer.ValidateFieldList(req.Fields); err != nil {
+            return nil, err
+        }
+        fields = sanitizer.QuoteFieldList(req.Fields)
     }
 
     var rows []map[string]interface{}
@@ -366,6 +464,10 @@ func joinFields(fields []string) string {
 
 // GetTableSchema 获取表结构信息
 func (r *Repository) GetTableSchema(tableName string) (*TableSchema, error) {
+	if err := sanitizer.ValidateTableName(tableName); err != nil {
+		return nil, err
+	}
+
 	var results []struct {
 		Field          string `gorm:"column:COLUMN_NAME"`
 		Type           string `gorm:"column:DATA_TYPE"`

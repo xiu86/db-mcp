@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"db-mcp/internal/config"
+	"db-mcp/internal/errors"
+	"db-mcp/internal/middleware"
 	"db-mcp/internal/repository"
 	"db-mcp/internal/service"
 	"db-mcp/pkg/logger"
@@ -16,11 +19,13 @@ import (
 )
 
 type MCPServer struct {
-	server    *server.MCPServer
-	crud      *service.CRUDService
-	txService *service.TransactionService
-	config    *config.Config
-	logger    *logger.Logger
+	server     *server.MCPServer
+	crud       *service.CRUDService
+	txService  *service.TransactionService
+	config     *config.Config
+	logger     *logger.Logger
+	rateLimiter *middleware.RateLimiter
+	timeout    *middleware.TimeoutConfig
 }
 
 func NewMCPServer(db *gorm.DB, cfg *config.Config, log *logger.Logger) *MCPServer {
@@ -31,24 +36,79 @@ func NewMCPServer(db *gorm.DB, cfg *config.Config, log *logger.Logger) *MCPServe
 	)
 
 	repo := repository.New(db)
-	auditSvc := service.NewAuditService(nil, cfg.Database.Database+"_audit")
+	auditSvc := service.NewAuditServiceWithDB(cfg.Log.AuditFile, db)
 	crudSvc := service.NewCRUDService(repo, auditSvc, cfg, log)
 	txSvc := service.NewTransactionService(db, auditSvc, cfg, log)
+	rateLimiter := middleware.NewRateLimiter(&cfg.RateLimit)
+	timeout := middleware.DefaultTimeoutConfig()
+	if cfg.Timeout.Connect > 0 {
+		timeout.Connect = time.Duration(cfg.Timeout.Connect) * time.Second
+	}
+	if cfg.Timeout.Query > 0 {
+		timeout.Query = time.Duration(cfg.Timeout.Query) * time.Second
+	}
+	if cfg.Timeout.Mutation > 0 {
+		timeout.Mutation = time.Duration(cfg.Timeout.Mutation) * time.Second
+	}
+	if cfg.Timeout.Transaction > 0 {
+		timeout.Transaction = time.Duration(cfg.Timeout.Transaction) * time.Second
+	}
 
 	mcpServer := &MCPServer{
-		server:    s,
-		crud:      crudSvc,
-		txService: txSvc,
-		config:    cfg,
-		logger:    log,
+		server:     s,
+		crud:       crudSvc,
+		txService:  txSvc,
+		config:     cfg,
+		logger:     log,
+		rateLimiter: rateLimiter,
+		timeout:    timeout,
 	}
 
 	mcpServer.registerTools()
 	return mcpServer
 }
 
+func (s *MCPServer) checkRateLimit() error {
+	if s.rateLimiter == nil || !s.rateLimiter.Enabled() {
+		return nil
+	}
+	if !s.rateLimiter.Allow() {
+		return errors.NewError(errors.ErrRateLimit, "rate limit exceeded", nil)
+	}
+	return nil
+}
+
+func (s *MCPServer) withQueryTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if s.timeout == nil {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, s.timeout.QueryTimeout())
+}
+
+func (s *MCPServer) withMutationTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if s.timeout == nil {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, s.timeout.MutationTimeout())
+}
+
+func (s *MCPServer) withTransactionTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if s.timeout == nil {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, s.timeout.TransactionTimeout())
+}
+
 func (s *MCPServer) GetServer() *server.MCPServer {
 	return s.server
+}
+
+// Close closes all resources held by the MCP server (audit log file, etc.)
+func (s *MCPServer) Close() error {
+	if s.crud != nil {
+		s.crud.Close()
+	}
+	return nil
 }
 
 func (s *MCPServer) registerTools() {
@@ -124,8 +184,8 @@ func (s *MCPServer) registerTools() {
 		mcp.WithArray("operations", mcp.Required(), mcp.Description("Array of operations to execute")),
 	), s.handleTransaction)
 
-	// db_schema tool
-	s.server.AddTool(mcp.NewTool("db_schema",
+	// db_describe tool
+	s.server.AddTool(mcp.NewTool("db_describe",
 		mcp.WithDescription("Get table schema and detected delete fields"),
 		mcp.WithString("table", mcp.Required(), mcp.Description("Table name to get schema")),
 	), s.handleSchema)
@@ -145,6 +205,12 @@ func getArgs(request mcp.CallToolRequest) map[string]interface{} {
 }
 
 func (s *MCPServer) handleQuery(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.checkRateLimit(); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	timeoutCtx, cancel := s.withQueryTimeout(ctx)
+	defer cancel()
+
 	args := getArgs(request)
 	table, _ := args["table"].(string)
 	fields := toStringSlice(args["fields"])
@@ -153,7 +219,7 @@ func (s *MCPServer) handleQuery(ctx context.Context, request mcp.CallToolRequest
 	limit, _ := args["limit"].(float64)
 	offset, _ := args["offset"].(float64)
 
-	result, err := s.crud.Query(ctx, table, fields, where, order, int(limit), int(offset))
+	result, err := s.crud.Query(timeoutCtx, table, fields, where, order, int(limit), int(offset))
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -162,11 +228,17 @@ func (s *MCPServer) handleQuery(ctx context.Context, request mcp.CallToolRequest
 }
 
 func (s *MCPServer) handleInsert(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.checkRateLimit(); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	timeoutCtx, cancel := s.withMutationTimeout(ctx)
+	defer cancel()
+
 	args := getArgs(request)
 	table, _ := args["table"].(string)
 	data, _ := args["data"].(map[string]interface{})
 
-	result, err := s.crud.Insert(ctx, table, data)
+	result, err := s.crud.Insert(timeoutCtx, table, data)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -175,12 +247,18 @@ func (s *MCPServer) handleInsert(ctx context.Context, request mcp.CallToolReques
 }
 
 func (s *MCPServer) handleUpdate(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.checkRateLimit(); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	timeoutCtx, cancel := s.withMutationTimeout(ctx)
+	defer cancel()
+
 	args := getArgs(request)
 	table, _ := args["table"].(string)
 	data, _ := args["data"].(map[string]interface{})
 	where, _ := args["where"].(map[string]interface{})
 
-	result, err := s.crud.Update(ctx, table, data, where)
+	result, err := s.crud.Update(timeoutCtx, table, data, where)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -189,11 +267,17 @@ func (s *MCPServer) handleUpdate(ctx context.Context, request mcp.CallToolReques
 }
 
 func (s *MCPServer) handleDelete(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.checkRateLimit(); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	timeoutCtx, cancel := s.withMutationTimeout(ctx)
+	defer cancel()
+
 	args := getArgs(request)
 	table, _ := args["table"].(string)
 	where, _ := args["where"].(map[string]interface{})
 
-	result, err := s.crud.Delete(ctx, table, where)
+	result, err := s.crud.Delete(timeoutCtx, table, where)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -202,11 +286,21 @@ func (s *MCPServer) handleDelete(ctx context.Context, request mcp.CallToolReques
 }
 
 func (s *MCPServer) handleBatchInsert(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.checkRateLimit(); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	args := getArgs(request)
 	table, _ := args["table"].(string)
 	dataArray := toMapSlice(args["data"])
 
-	result, err := s.crud.BatchInsert(ctx, table, dataArray)
+	if len(dataArray) > 1000 {
+		return mcp.NewToolResultError(errors.NewError(errors.ErrInvalidInput, "batch insert exceeds maximum of 1000 items", nil).Error()), nil
+	}
+
+	timeoutCtx, cancel := s.withMutationTimeout(ctx)
+	defer cancel()
+
+	result, err := s.crud.BatchInsert(timeoutCtx, table, dataArray)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -215,6 +309,9 @@ func (s *MCPServer) handleBatchInsert(ctx context.Context, request mcp.CallToolR
 }
 
 func (s *MCPServer) handleBatchUpdate(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.checkRateLimit(); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	args := getArgs(request)
 	table, _ := args["table"].(string)
 	dataArray := toMapSlice(args["data"])
@@ -223,7 +320,14 @@ func (s *MCPServer) handleBatchUpdate(ctx context.Context, request mcp.CallToolR
 		keyField = "id"
 	}
 
-	result, err := s.crud.BatchUpdate(ctx, table, dataArray, keyField)
+	if len(dataArray) > 1000 {
+		return mcp.NewToolResultError(errors.NewError(errors.ErrInvalidInput, "batch update exceeds maximum of 1000 items", nil).Error()), nil
+	}
+
+	timeoutCtx, cancel := s.withMutationTimeout(ctx)
+	defer cancel()
+
+	result, err := s.crud.BatchUpdate(timeoutCtx, table, dataArray, keyField)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -232,6 +336,9 @@ func (s *MCPServer) handleBatchUpdate(ctx context.Context, request mcp.CallToolR
 }
 
 func (s *MCPServer) handleBatchDelete(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.checkRateLimit(); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	args := getArgs(request)
 	table, _ := args["table"].(string)
 	ids := toStringSlice(args["ids"])
@@ -240,7 +347,14 @@ func (s *MCPServer) handleBatchDelete(ctx context.Context, request mcp.CallToolR
 		idField = "id"
 	}
 
-	result, err := s.crud.BatchDelete(ctx, table, ids, idField)
+	if len(ids) > 1000 {
+		return mcp.NewToolResultError(errors.NewError(errors.ErrInvalidInput, "batch delete exceeds maximum of 1000 IDs", nil).Error()), nil
+	}
+
+	timeoutCtx, cancel := s.withMutationTimeout(ctx)
+	defer cancel()
+
+	result, err := s.crud.BatchDelete(timeoutCtx, table, ids, idField)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -249,9 +363,17 @@ func (s *MCPServer) handleBatchDelete(ctx context.Context, request mcp.CallToolR
 }
 
 func (s *MCPServer) handleJoin(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.checkRateLimit(); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	args := getArgs(request)
+	tables := toTableRefs(args["tables"])
+	if len(tables) > 5 {
+		return mcp.NewToolResultError(errors.NewError(errors.ErrInvalidInput, "join exceeds maximum of 5 tables", nil).Error()), nil
+	}
+
 	joinReq := &repository.JoinRequest{
-		Tables: toTableRefs(args["tables"]),
+		Tables: tables,
 		Joins:  toJoinClauses(args["joins"]),
 		Fields: toStringSlice(args["fields"]),
 		Where:  toMap(args["where"]),
@@ -260,7 +382,10 @@ func (s *MCPServer) handleJoin(ctx context.Context, request mcp.CallToolRequest)
 		joinReq.Limit = int(limit)
 	}
 
-	result, err := s.crud.Join(ctx, joinReq)
+	timeoutCtx, cancel := s.withQueryTimeout(ctx)
+	defer cancel()
+
+	result, err := s.crud.Join(timeoutCtx, joinReq)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -269,10 +394,22 @@ func (s *MCPServer) handleJoin(ctx context.Context, request mcp.CallToolRequest)
 }
 
 func (s *MCPServer) handleTransaction(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.checkRateLimit(); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	args := getArgs(request)
 	operations := toOperations(args["operations"])
+	if len(operations) < 2 {
+		return mcp.NewToolResultError(errors.NewError(errors.ErrInvalidInput, "transaction requires at least 2 operations", nil).Error()), nil
+	}
+	if len(operations) > 50 {
+		return mcp.NewToolResultError(errors.NewError(errors.ErrInvalidInput, "transaction exceeds maximum of 50 operations", nil).Error()), nil
+	}
 
-	txCtx, err := s.txService.Begin(ctx)
+	timeoutCtx, cancel := s.withTransactionTimeout(ctx)
+	defer cancel()
+
+	txCtx, err := s.txService.Begin(timeoutCtx)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -294,6 +431,8 @@ func (s *MCPServer) handleTransaction(ctx context.Context, request mcp.CallToolR
 			res = map[string]string{"status": "deleted"}
 		case "query":
 			res, opErr = txCtx.Query(op.Table, op.Fields, op.Where)
+		default:
+			opErr = fmt.Errorf("unknown operation type: %s", op.Type)
 		}
 
 		if opErr != nil {
@@ -314,10 +453,16 @@ func (s *MCPServer) handleTransaction(ctx context.Context, request mcp.CallToolR
 }
 
 func (s *MCPServer) handleSchema(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := s.checkRateLimit(); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	timeoutCtx, cancel := s.withQueryTimeout(ctx)
+	defer cancel()
+
 	args := getArgs(request)
 	table, _ := args["table"].(string)
 
-	result, err := s.crud.GetSchema(ctx, table)
+	result, err := s.crud.GetSchema(timeoutCtx, table)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

@@ -26,6 +26,12 @@ func NewCRUDService(repo repository.RepositoryInterface, audit *AuditService, cf
     }
 }
 
+func (s *CRUDService) Close() {
+    if s.audit != nil {
+        s.audit.Close()
+    }
+}
+
 func (s *CRUDService) Query(ctx context.Context, table string, fields []string, where map[string]interface{}, order []repository.OrderBy, limit, offset int) (*repository.QueryResult, error) {
     auditCtx := s.audit.Start("query", table, "")
     result, err := s.repo.Query(&repository.QueryRequest{
@@ -36,6 +42,7 @@ func (s *CRUDService) Query(ctx context.Context, table string, fields []string, 
         Limit:  limit,
         Offset: offset,
     })
+    CaptureSQLForContext(auditCtx)
     if err != nil {
         s.audit.Fail(auditCtx, err.Error())
         return nil, err
@@ -50,6 +57,7 @@ func (s *CRUDService) Insert(ctx context.Context, table string, data map[string]
         Table: table,
         Data:  data,
     })
+    CaptureSQLForContext(auditCtx)
     if err != nil {
         s.audit.Fail(auditCtx, err.Error())
         return nil, err
@@ -67,12 +75,14 @@ func (s *CRUDService) Update(ctx context.Context, table string, data, where map[
         Where: where,
         Limit: 100,
     })
+    CaptureSQLForContext(auditCtx)
 
     result, err := s.repo.Update(&repository.UpdateRequest{
         Table: table,
         Data:  data,
         Where: where,
     })
+    CaptureSQLForContext(auditCtx)
     if err != nil {
         s.audit.Fail(auditCtx, err.Error())
         return nil, err
@@ -94,12 +104,14 @@ func (s *CRUDService) Delete(ctx context.Context, table string, where map[string
         Where: where,
         Limit: 100,
     })
+    CaptureSQLForContext(auditCtx)
 
     result, err := s.repo.LogicalDelete(&repository.DeleteRequest{
         Table:       table,
         Where:       where,
         DeleteField: deleteField,
     })
+    CaptureSQLForContext(auditCtx)
     if err != nil {
         s.audit.Fail(auditCtx, err.Error())
         return nil, err
@@ -114,6 +126,7 @@ func (s *CRUDService) BatchInsert(ctx context.Context, table string, data []map[
         Table: table,
         Data:  data,
     })
+    CaptureSQLForContext(auditCtx)
     if err != nil {
         s.audit.Fail(auditCtx, err.Error())
         return nil, err
@@ -129,6 +142,7 @@ func (s *CRUDService) BatchUpdate(ctx context.Context, table string, data []map[
         Data:     data,
         KeyField: keyField,
     })
+    CaptureSQLForContext(auditCtx)
     if err != nil {
         s.audit.Fail(auditCtx, err.Error())
         return nil, err
@@ -149,6 +163,7 @@ func (s *CRUDService) BatchDelete(ctx context.Context, table string, ids []strin
         IDField:     idField,
         DeleteField: deleteField,
     })
+    CaptureSQLForContext(auditCtx)
     if err != nil {
         s.audit.Fail(auditCtx, err.Error())
         return nil, err
@@ -158,8 +173,13 @@ func (s *CRUDService) BatchDelete(ctx context.Context, table string, ids []strin
 }
 
 func (s *CRUDService) Join(ctx context.Context, req *repository.JoinRequest) (*repository.QueryResult, error) {
-    auditCtx := s.audit.Start("join", req.Tables[0].Name, "")
+    tableName := ""
+    if len(req.Tables) > 0 {
+        tableName = req.Tables[0].Name
+    }
+    auditCtx := s.audit.Start("join", tableName, "")
     result, err := s.repo.JoinQuery(req)
+    CaptureSQLForContext(auditCtx)
     if err != nil {
         s.audit.Fail(auditCtx, err.Error())
         return nil, err

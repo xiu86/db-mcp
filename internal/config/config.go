@@ -4,18 +4,25 @@ import (
     "fmt"
     "os"
     "strconv"
-    "strings"
     "time"
 
     "gopkg.in/yaml.v3"
 )
 
 type Config struct {
-    Database  DatabaseConfig  `yaml:"database" json:"database"`
-    MCP       MCPConfig       `yaml:"mcp" json:"mcp"`
-    Log       LogConfig       `yaml:"log" json:"log"`
-    RateLimit RateLimitConfig `yaml:"rateLimit" json:"rateLimit"`
-    Pool      PoolConfig      `yaml:"pool" json:"pool"`
+    Database  DatabaseConfig          `yaml:"database" json:"database"`
+    MCP       MCPConfig               `yaml:"mcp" json:"mcp"`
+    Log       LogConfig               `yaml:"log" json:"log"`
+    RateLimit RateLimitConfig         `yaml:"rateLimit" json:"rateLimit"`
+    Pool      PoolConfig              `yaml:"pool" json:"pool"`
+    Timeout   TimeoutConfigLoadable  `yaml:"timeout" json:"timeout"`
+}
+
+type TimeoutConfigLoadable struct {
+    Connect     int `yaml:"connect" json:"connect"`         // seconds
+    Query       int `yaml:"query" json:"query"`             // seconds
+    Mutation    int `yaml:"mutation" json:"mutation"`       // seconds
+    Transaction int `yaml:"transaction" json:"transaction"`   // seconds
 }
 
 type DatabaseConfig struct {
@@ -37,6 +44,7 @@ type LogConfig struct {
     Format     string `yaml:"format" json:"format"`
     Output     string `yaml:"output" json:"output"`
     AuditTable string `yaml:"auditTable" json:"auditTable"`
+    AuditFile  string `yaml:"auditFile" json:"auditFile"`
 }
 
 type RateLimitConfig struct {
@@ -70,11 +78,18 @@ func DefaultConfig() *Config {
             Format:     "json",
             Output:     "stdout",
             AuditTable: "_audit_logs",
+            AuditFile:  "audit.log",
         },
         RateLimit: RateLimitConfig{
             Enabled:  true,
             Requests: 100,
             Burst:    200,
+        },
+        Timeout: TimeoutConfigLoadable{
+            Connect:     5,
+            Query:       30,
+            Mutation:    10,
+            Transaction: 60,
         },
     }
 }
@@ -86,16 +101,13 @@ func Load(configPath string) (*Config, error) {
         // #nosec G304 - configPath is user-provided but intentionally used for config file loading
         data, err := os.ReadFile(configPath)
         if err != nil {
-            return nil, fmt.Errorf("failed to read config file: %w", err)
-        }
-
-        if strings.HasSuffix(configPath, ".yaml") || strings.HasSuffix(configPath, ".yml") {
-            if err := yaml.Unmarshal(data, cfg); err != nil {
-                return nil, fmt.Errorf("failed to parse yaml: %w", err)
+            if !os.IsNotExist(err) {
+                return nil, fmt.Errorf("failed to read config file: %w", err)
             }
+            // Config file does not exist, use defaults + env vars
         } else {
             if err := yaml.Unmarshal(data, cfg); err != nil {
-                return nil, fmt.Errorf("failed to parse config: %w", err)
+                return nil, fmt.Errorf("failed to parse yaml: %w", err)
             }
         }
     }

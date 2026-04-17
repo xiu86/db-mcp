@@ -22,7 +22,7 @@ func TestNewCRUDService(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockRepo := repository.NewMockRepositoryInterface(ctrl)
-	audit := NewAuditService(nil, "test_audit")
+	audit := NewAuditService("")
 	cfg := &config.Config{}
 	log := newTestLogger()
 
@@ -37,7 +37,7 @@ func TestCRUDService_Query(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockRepo := repository.NewMockRepositoryInterface(ctrl)
-	audit := NewAuditService(nil, "test_audit")
+	audit := NewAuditService("")
 	cfg := &config.Config{}
 	log := newTestLogger()
 	service := NewCRUDService(mockRepo, audit, cfg, log)
@@ -84,7 +84,7 @@ func TestCRUDService_Insert(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockRepo := repository.NewMockRepositoryInterface(ctrl)
-	audit := NewAuditService(nil, "test_audit")
+	audit := NewAuditService("")
 	cfg := &config.Config{}
 	log := newTestLogger()
 	service := NewCRUDService(mockRepo, audit, cfg, log)
@@ -121,7 +121,7 @@ func TestCRUDService_Update(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockRepo := repository.NewMockRepositoryInterface(ctrl)
-	audit := NewAuditService(nil, "test_audit")
+	audit := NewAuditService("")
 	cfg := &config.Config{}
 	log := newTestLogger()
 	service := NewCRUDService(mockRepo, audit, cfg, log)
@@ -172,7 +172,7 @@ func TestCRUDService_Delete(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockRepo := repository.NewMockRepositoryInterface(ctrl)
-		audit := NewAuditService(nil, "test_audit")
+		audit := NewAuditService("")
 		cfg := &config.Config{}
 		log := newTestLogger()
 		service := NewCRUDService(mockRepo, audit, cfg, log)
@@ -222,7 +222,7 @@ func TestCRUDService_Delete(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockRepo := repository.NewMockRepositoryInterface(ctrl)
-		audit := NewAuditService(nil, "test_audit")
+		audit := NewAuditService("")
 		cfg := &config.Config{}
 		log := newTestLogger()
 		service := NewCRUDService(mockRepo, audit, cfg, log)
@@ -251,7 +251,7 @@ func TestCRUDService_BatchInsert(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockRepo := repository.NewMockRepositoryInterface(ctrl)
-	audit := NewAuditService(nil, "test_audit")
+	audit := NewAuditService("")
 	cfg := &config.Config{}
 	log := newTestLogger()
 	service := NewCRUDService(mockRepo, audit, cfg, log)
@@ -291,7 +291,7 @@ func TestCRUDService_BatchUpdate(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockRepo := repository.NewMockRepositoryInterface(ctrl)
-	audit := NewAuditService(nil, "test_audit")
+	audit := NewAuditService("")
 	cfg := &config.Config{}
 	log := newTestLogger()
 	service := NewCRUDService(mockRepo, audit, cfg, log)
@@ -333,7 +333,7 @@ func TestCRUDService_BatchDelete(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockRepo := repository.NewMockRepositoryInterface(ctrl)
-		audit := NewAuditService(nil, "test_audit")
+		audit := NewAuditService("")
 		cfg := &config.Config{}
 		log := newTestLogger()
 		service := NewCRUDService(mockRepo, audit, cfg, log)
@@ -372,7 +372,7 @@ func TestCRUDService_BatchDelete(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockRepo := repository.NewMockRepositoryInterface(ctrl)
-		audit := NewAuditService(nil, "test_audit")
+		audit := NewAuditService("")
 		cfg := &config.Config{}
 		log := newTestLogger()
 		service := NewCRUDService(mockRepo, audit, cfg, log)
@@ -398,7 +398,7 @@ func TestCRUDService_Join(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockRepo := repository.NewMockRepositoryInterface(ctrl)
-	audit := NewAuditService(nil, "test_audit")
+	audit := NewAuditService("")
 	cfg := &config.Config{}
 	log := newTestLogger()
 	service := NewCRUDService(mockRepo, audit, cfg, log)
@@ -446,7 +446,7 @@ func TestCRUDService_GetSchema(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockRepo := repository.NewMockRepositoryInterface(ctrl)
-	audit := NewAuditService(nil, "test_audit")
+	audit := NewAuditService("")
 	cfg := &config.Config{}
 	log := newTestLogger()
 	service := NewCRUDService(mockRepo, audit, cfg, log)
@@ -487,7 +487,7 @@ func TestCRUDService_getTableColumns(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockRepo := repository.NewMockRepositoryInterface(ctrl)
-	audit := NewAuditService(nil, "test_audit")
+	audit := NewAuditService("")
 	cfg := &config.Config{}
 	log := newTestLogger()
 	service := NewCRUDService(mockRepo, audit, cfg, log)
@@ -524,7 +524,7 @@ func TestCRUDService_toDetectorColumns(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockRepo := repository.NewMockRepositoryInterface(ctrl)
-	audit := NewAuditService(nil, "test_audit")
+	audit := NewAuditService("")
 	cfg := &config.Config{}
 	log := newTestLogger()
 	service := NewCRUDService(mockRepo, audit, cfg, log)

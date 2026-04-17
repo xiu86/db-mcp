@@ -4,14 +4,13 @@
 package integration
 
 import (
-	"os"
 	"testing"
 
 	"db-mcp/internal/service"
 )
 
 func TestAuditService_Operations(t *testing.T) {
-	audit := service.NewAuditService(nil, "test_audit")
+	audit := service.NewAuditService("")
 
 	// Test Start
 	ctx := audit.Start("query", "users", "1")
@@ -33,11 +32,4 @@ func TestAuditService_Operations(t *testing.T) {
 	// Test Fail
 	ctx2 := audit.Start("update", "users", "1")
 	audit.Fail(ctx2, "connection timeout")
-}
-
-func TestMain_Audit(m *testing.M) {
-	if os.Getenv("RUN_INTEGRATION_TESTS") != "true" {
-		os.Exit(0)
-	}
-	os.Exit(m.Run())
 }
