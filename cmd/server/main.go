@@ -35,6 +35,14 @@ func main() {
 	}
 
 	// Initialize logger
+	transport := cfg.MCP.Transport
+	if transport == "" {
+		transport = "stdio" // default
+	}
+	// In stdio mode, stdout must be reserved for MCP JSON-RPC frames.
+	if transport == "stdio" {
+		cfg.Log.Output = "stderr"
+	}
 	log := logger.NewLogger(&cfg.Log)
 
 	log.Info("Starting db-mcp server", "version", version)
@@ -60,12 +68,6 @@ func main() {
 		log.Error("Failed to create MCP server", "error", err)
 		connManager.Close()
 		os.Exit(1)
-	}
-
-	// Determine transport mode
-	transport := cfg.MCP.Transport
-	if transport == "" {
-		transport = "stdio" // default
 	}
 
 	srv := mcpSvc.GetServer()

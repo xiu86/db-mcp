@@ -9,8 +9,6 @@ import (
 	"db-mcp/internal/config"
 )
 
-var out io.Writer = os.Stdout
-
 type Logger struct {
 	level  slog.Level
 	format string
@@ -20,6 +18,7 @@ type Logger struct {
 type LogFields map[string]interface{}
 
 func NewLogger(cfg *config.LogConfig) *Logger {
+	out := resolveOutput(cfg.Output)
 	var handler slog.Handler
 	opts := &slog.HandlerOptions{
 		Level: parseLevel(cfg.Level),
@@ -36,6 +35,17 @@ func NewLogger(cfg *config.LogConfig) *Logger {
 		level:  parseLevel(cfg.Level),
 		format: cfg.Format,
 		logger: slog.New(handler),
+	}
+}
+
+func resolveOutput(output string) io.Writer {
+	switch strings.ToLower(strings.TrimSpace(output)) {
+	case "", "stdout":
+		return os.Stdout
+	case "stderr":
+		return os.Stderr
+	default:
+		return os.Stdout
 	}
 }
 

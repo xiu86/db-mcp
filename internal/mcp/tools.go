@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"db-mcp/internal/config"
@@ -42,6 +43,7 @@ func NewMCPServer(cm *connection.ConnectionManager, cfg *config.Config, log *log
 		"db-mcp",
 		"1.0.0",
 		server.WithToolCapabilities(true),
+		server.WithResourceCapabilities(false, true),
 	)
 
 	var crudSvc *service.CRUDService
@@ -83,6 +85,7 @@ func NewMCPServer(cm *connection.ConnectionManager, cfg *config.Config, log *log
 	}
 
 	mcpServer.registerTools()
+	mcpServer.registerResources()
 	return mcpServer, nil
 }
 
@@ -230,6 +233,28 @@ func (s *MCPServer) registerTools() {
 	), s.handleListInstances)
 }
 
+func (s *MCPServer) registerResources() {
+	s.server.AddResource(
+		mcp.NewResource(
+			"db://instances",
+			"db_instances",
+			mcp.WithResourceDescription("List all available database instances"),
+			mcp.WithMIMEType("application/json"),
+		),
+		s.handleInstancesResource,
+	)
+
+	s.server.AddResourceTemplate(
+		mcp.NewResourceTemplate(
+			"db://table/{table}",
+			"db_table_preview",
+			mcp.WithTemplateDescription("Preview top rows for a table/collection in current instance"),
+			mcp.WithTemplateMIMEType("application/json"),
+		),
+		s.handleTablePreviewResource,
+	)
+}
+
 func getArgs(request mcp.CallToolRequest) map[string]interface{} {
 	args := request.GetArguments()
 	if args == nil {
@@ -243,6 +268,30 @@ func getArgs(request mcp.CallToolRequest) map[string]interface{} {
 	return result
 }
 
+func (s *MCPServer) getCRUDService(instance string) (*service.CRUDService, func(), error) {
+	if s.connManager == nil {
+		if s.crud == nil {
+			return nil, nil, fmt.Errorf("database service not initialized")
+		}
+		return s.crud, func() {}, nil
+	}
+
+	target := strings.TrimSpace(instance)
+	if target == "" {
+		target = s.connManager.CurrentInstance()
+	}
+
+	dbDriver, err := s.connManager.GetDriver(target)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	repo := repository.New(dbDriver)
+	auditSvc := service.NewAuditServiceWithDB(s.config.Log.AuditFile, nil)
+	crudSvc := service.NewCRUDService(repo, auditSvc, s.config, s.logger)
+	return crudSvc, func() { crudSvc.Close() }, nil
+}
+
 func (s *MCPServer) handleQuery(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if err := s.checkRateLimit(); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -251,6 +300,7 @@ func (s *MCPServer) handleQuery(ctx context.Context, request mcp.CallToolRequest
 	defer cancel()
 
 	args := getArgs(request)
+	instance, _ := args["instance"].(string)
 	table, _ := args["table"].(string)
 	fields := toStringSlice(args["fields"])
 	where, _ := args["where"].(map[string]interface{})
@@ -258,7 +308,13 @@ func (s *MCPServer) handleQuery(ctx context.Context, request mcp.CallToolRequest
 	limit, _ := args["limit"].(float64)
 	offset, _ := args["offset"].(float64)
 
-	result, err := s.crud.Query(timeoutCtx, table, fields, where, order, int(limit), int(offset))
+	crudSvc, closeFn, err := s.getCRUDService(instance)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	defer closeFn()
+
+	result, err := crudSvc.Query(timeoutCtx, table, fields, where, order, int(limit), int(offset))
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -274,10 +330,17 @@ func (s *MCPServer) handleInsert(ctx context.Context, request mcp.CallToolReques
 	defer cancel()
 
 	args := getArgs(request)
+	instance, _ := args["instance"].(string)
 	table, _ := args["table"].(string)
 	data, _ := args["data"].(map[string]interface{})
 
-	result, err := s.crud.Insert(timeoutCtx, table, data)
+	crudSvc, closeFn, err := s.getCRUDService(instance)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	defer closeFn()
+
+	result, err := crudSvc.Insert(timeoutCtx, table, data)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -293,11 +356,18 @@ func (s *MCPServer) handleUpdate(ctx context.Context, request mcp.CallToolReques
 	defer cancel()
 
 	args := getArgs(request)
+	instance, _ := args["instance"].(string)
 	table, _ := args["table"].(string)
 	data, _ := args["data"].(map[string]interface{})
 	where, _ := args["where"].(map[string]interface{})
 
-	result, err := s.crud.Update(timeoutCtx, table, data, where)
+	crudSvc, closeFn, err := s.getCRUDService(instance)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	defer closeFn()
+
+	result, err := crudSvc.Update(timeoutCtx, table, data, where)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -313,10 +383,17 @@ func (s *MCPServer) handleDelete(ctx context.Context, request mcp.CallToolReques
 	defer cancel()
 
 	args := getArgs(request)
+	instance, _ := args["instance"].(string)
 	table, _ := args["table"].(string)
 	where, _ := args["where"].(map[string]interface{})
 
-	result, err := s.crud.Delete(timeoutCtx, table, where)
+	crudSvc, closeFn, err := s.getCRUDService(instance)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	defer closeFn()
+
+	result, err := crudSvc.Delete(timeoutCtx, table, where)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -329,6 +406,7 @@ func (s *MCPServer) handleBatchInsert(ctx context.Context, request mcp.CallToolR
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	args := getArgs(request)
+	instance, _ := args["instance"].(string)
 	table, _ := args["table"].(string)
 	dataArray := toMapSlice(args["data"])
 
@@ -339,7 +417,13 @@ func (s *MCPServer) handleBatchInsert(ctx context.Context, request mcp.CallToolR
 	timeoutCtx, cancel := s.withMutationTimeout(ctx)
 	defer cancel()
 
-	result, err := s.crud.BatchInsert(timeoutCtx, table, dataArray)
+	crudSvc, closeFn, err := s.getCRUDService(instance)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	defer closeFn()
+
+	result, err := crudSvc.BatchInsert(timeoutCtx, table, dataArray)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -352,6 +436,7 @@ func (s *MCPServer) handleBatchUpdate(ctx context.Context, request mcp.CallToolR
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	args := getArgs(request)
+	instance, _ := args["instance"].(string)
 	table, _ := args["table"].(string)
 	dataArray := toMapSlice(args["data"])
 	keyField, _ := args["key_field"].(string)
@@ -366,7 +451,13 @@ func (s *MCPServer) handleBatchUpdate(ctx context.Context, request mcp.CallToolR
 	timeoutCtx, cancel := s.withMutationTimeout(ctx)
 	defer cancel()
 
-	result, err := s.crud.BatchUpdate(timeoutCtx, table, dataArray, keyField)
+	crudSvc, closeFn, err := s.getCRUDService(instance)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	defer closeFn()
+
+	result, err := crudSvc.BatchUpdate(timeoutCtx, table, dataArray, keyField)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -379,6 +470,7 @@ func (s *MCPServer) handleBatchDelete(ctx context.Context, request mcp.CallToolR
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	args := getArgs(request)
+	instance, _ := args["instance"].(string)
 	table, _ := args["table"].(string)
 	ids := toStringSlice(args["ids"])
 	idField, _ := args["id_field"].(string)
@@ -393,7 +485,13 @@ func (s *MCPServer) handleBatchDelete(ctx context.Context, request mcp.CallToolR
 	timeoutCtx, cancel := s.withMutationTimeout(ctx)
 	defer cancel()
 
-	result, err := s.crud.BatchDelete(timeoutCtx, table, ids, idField)
+	crudSvc, closeFn, err := s.getCRUDService(instance)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	defer closeFn()
+
+	result, err := crudSvc.BatchDelete(timeoutCtx, table, ids, idField)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -406,6 +504,7 @@ func (s *MCPServer) handleJoin(ctx context.Context, request mcp.CallToolRequest)
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	args := getArgs(request)
+	instance, _ := args["instance"].(string)
 	tables := toTableRefs(args["tables"])
 	if len(tables) > 5 {
 		return mcp.NewToolResultError(errors.NewError(errors.ErrInvalidInput, "join exceeds maximum of 5 tables", nil).Error()), nil
@@ -424,7 +523,13 @@ func (s *MCPServer) handleJoin(ctx context.Context, request mcp.CallToolRequest)
 	timeoutCtx, cancel := s.withQueryTimeout(ctx)
 	defer cancel()
 
-	result, err := s.crud.Join(timeoutCtx, joinReq)
+	crudSvc, closeFn, err := s.getCRUDService(instance)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	defer closeFn()
+
+	result, err := crudSvc.Join(timeoutCtx, joinReq)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -499,9 +604,16 @@ func (s *MCPServer) handleSchema(ctx context.Context, request mcp.CallToolReques
 	defer cancel()
 
 	args := getArgs(request)
+	instance, _ := args["instance"].(string)
 	table, _ := args["table"].(string)
 
-	result, err := s.crud.GetSchema(timeoutCtx, table)
+	crudSvc, closeFn, err := s.getCRUDService(instance)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	defer closeFn()
+
+	result, err := crudSvc.GetSchema(timeoutCtx, table)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -526,8 +638,70 @@ func (s *MCPServer) handleListInstances(ctx context.Context, request mcp.CallToo
 
 	return mcp.NewToolResultText(toJSON(map[string]interface{}{
 		"instances": instances,
-		"current":    current,
+		"current":   current,
 	})), nil
+}
+
+func (s *MCPServer) handleInstancesResource(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+	if s.connManager == nil {
+		return nil, fmt.Errorf("connection manager not initialized")
+	}
+
+	contents := mcp.TextResourceContents{
+		URI:      request.Params.URI,
+		MIMEType: "application/json",
+		Text: toJSON(map[string]interface{}{
+			"instances": s.connManager.ListInstances(),
+			"current":   s.connManager.CurrentInstance(),
+		}),
+	}
+	return []mcp.ResourceContents{contents}, nil
+}
+
+func (s *MCPServer) handleTablePreviewResource(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+	if err := s.checkRateLimit(); err != nil {
+		return nil, err
+	}
+
+	table := getTemplateArg(request.Params.Arguments, "table")
+	if table == "" {
+		uri := strings.TrimPrefix(request.Params.URI, "db://table/")
+		table = strings.TrimSpace(uri)
+	}
+	if table == "" {
+		return nil, fmt.Errorf("missing table in resource URI")
+	}
+
+	timeoutCtx, cancel := s.withQueryTimeout(ctx)
+	defer cancel()
+
+	crudSvc, closeFn, err := s.getCRUDService("")
+	if err != nil {
+		return nil, err
+	}
+	defer closeFn()
+
+	result, err := crudSvc.Query(timeoutCtx, table, nil, nil, nil, 20, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]interface{}{
+		"table":    table,
+		"limit":    20,
+		"instance": "",
+		"result":   result,
+	}
+	if s.connManager != nil {
+		payload["instance"] = s.connManager.CurrentInstance()
+	}
+
+	contents := mcp.TextResourceContents{
+		URI:      request.Params.URI,
+		MIMEType: "application/json",
+		Text:     toJSON(payload),
+	}
+	return []mcp.ResourceContents{contents}, nil
 }
 
 // Helper types and functions
@@ -678,4 +852,29 @@ func toJSON(v interface{}) string {
 		return "{}"
 	}
 	return string(bytes)
+}
+
+func getTemplateArg(args map[string]interface{}, key string) string {
+	if args == nil {
+		return ""
+	}
+	raw, ok := args[key]
+	if !ok {
+		return ""
+	}
+	switch v := raw.(type) {
+	case string:
+		return v
+	case []string:
+		if len(v) > 0 {
+			return v[0]
+		}
+	case []interface{}:
+		if len(v) > 0 {
+			if s, ok := v[0].(string); ok {
+				return s
+			}
+		}
+	}
+	return ""
 }
