@@ -162,12 +162,13 @@ func (s *MCPServer) registerTools() {
 		mcp.WithObject("where", mcp.Required(), mcp.Description("Where conditions")),
 	), s.handleUpdate)
 
-	// db_delete tool (logical delete only)
+	// db_delete tool (logical by default)
 	s.server.AddTool(mcp.NewTool("db_delete",
-		mcp.WithDescription("Logical delete from database table"),
+		mcp.WithDescription("Delete from database table (logical by default; physical requires server permission)"),
 		mcp.WithString("table", mcp.Required(), mcp.Description("Table name")),
 		mcp.WithString("instance", mcp.Description("Database instance name (optional, uses current if not specified)")),
 		mcp.WithObject("where", mcp.Required(), mcp.Description("Where conditions")),
+		mcp.WithBoolean("physical_delete", mcp.DefaultBool(false), mcp.Description("Physically delete records; requires allowPhysicalDelete=true in server config")),
 	), s.handleDelete)
 
 	// db_batch_insert tool
@@ -189,11 +190,12 @@ func (s *MCPServer) registerTools() {
 
 	// db_batch_delete tool
 	s.server.AddTool(mcp.NewTool("db_batch_delete",
-		mcp.WithDescription("Batch logical delete from database table"),
+		mcp.WithDescription("Batch delete from database table (logical by default; physical requires server permission)"),
 		mcp.WithString("table", mcp.Required(), mcp.Description("Table name")),
 		mcp.WithString("instance", mcp.Description("Database instance name (optional, uses current if not specified)")),
 		mcp.WithArray("ids", mcp.Required(), mcp.Description("Array of IDs to delete")),
 		mcp.WithString("id_field", mcp.Description("ID field name (default: id)")),
+		mcp.WithBoolean("physical_delete", mcp.DefaultBool(false), mcp.Description("Physically delete records; requires allowPhysicalDelete=true in server config")),
 	), s.handleBatchDelete)
 
 	// db_join tool
@@ -211,7 +213,7 @@ func (s *MCPServer) registerTools() {
 	s.server.AddTool(mcp.NewTool("db_transaction",
 		mcp.WithDescription("Execute operations in a transaction"),
 		mcp.WithString("instance", mcp.Description("Database instance name (optional, uses current if not specified)")),
-		mcp.WithArray("operations", mcp.Required(), mcp.Description("Array of operations to execute")),
+		mcp.WithArray("operations", mcp.Required(), mcp.Description("Array of operations to execute; delete operations accept physical_delete (boolean, default false), requiring allowPhysicalDelete=true in server config")),
 	), s.handleTransaction)
 
 	// db_describe tool
@@ -386,6 +388,10 @@ func (s *MCPServer) handleDelete(ctx context.Context, request mcp.CallToolReques
 	instance, _ := args["instance"].(string)
 	table, _ := args["table"].(string)
 	where, _ := args["where"].(map[string]interface{})
+	physical, err := physicalDeleteArg(args)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 
 	crudSvc, closeFn, err := s.getCRUDService(instance)
 	if err != nil {
@@ -393,7 +399,7 @@ func (s *MCPServer) handleDelete(ctx context.Context, request mcp.CallToolReques
 	}
 	defer closeFn()
 
-	result, err := crudSvc.Delete(timeoutCtx, table, where)
+	result, err := crudSvc.Delete(timeoutCtx, table, where, physical)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -470,6 +476,10 @@ func (s *MCPServer) handleBatchDelete(ctx context.Context, request mcp.CallToolR
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	args := getArgs(request)
+	physical, err := physicalDeleteArg(args)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	instance, _ := args["instance"].(string)
 	table, _ := args["table"].(string)
 	ids := toStringSlice(args["ids"])
@@ -491,7 +501,7 @@ func (s *MCPServer) handleBatchDelete(ctx context.Context, request mcp.CallToolR
 	}
 	defer closeFn()
 
-	result, err := crudSvc.BatchDelete(timeoutCtx, table, ids, idField)
+	result, err := crudSvc.BatchDelete(timeoutCtx, table, ids, idField, physical)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -549,6 +559,22 @@ func (s *MCPServer) handleTransaction(ctx context.Context, request mcp.CallToolR
 	if len(operations) > 50 {
 		return mcp.NewToolResultError(errors.NewError(errors.ErrInvalidInput, "transaction exceeds maximum of 50 operations", nil).Error()), nil
 	}
+	// Reject forbidden deletion before starting the transaction or earlier writes.
+	for _, op := range toMapSlice(args["operations"]) {
+		if toString(op["type"]) != "delete" {
+			continue
+		}
+		physical, err := physicalDeleteArg(op)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if err := service.ValidateDeleteMode(s.config, physical); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if physical && len(toMap(op["where"])) == 0 {
+			return mcp.NewToolResultError("physical deletion requires non-empty where conditions"), nil
+		}
+	}
 
 	timeoutCtx, cancel := s.withTransactionTimeout(ctx)
 	defer cancel()
@@ -571,7 +597,7 @@ func (s *MCPServer) handleTransaction(ctx context.Context, request mcp.CallToolR
 			opErr = txCtx.Update(op.Table, op.Data, op.Where)
 			res = map[string]string{"status": "updated"}
 		case "delete":
-			opErr = txCtx.Delete(op.Table, op.Where)
+			opErr = txCtx.Delete(op.Table, op.Where, op.PhysicalDelete)
 			res = map[string]string{"status": "deleted"}
 		case "query":
 			res, opErr = txCtx.Query(op.Table, op.Fields, op.Where)
@@ -707,11 +733,12 @@ func (s *MCPServer) handleTablePreviewResource(ctx context.Context, request mcp.
 // Helper types and functions
 
 type Operation struct {
-	Type   string
-	Table  string
-	Data   map[string]interface{}
-	Where  map[string]interface{}
-	Fields []string
+	PhysicalDelete bool
+	Type           string
+	Table          string
+	Data           map[string]interface{}
+	Where          map[string]interface{}
+	Fields         []string
 }
 
 func toOperations(v interface{}) []Operation {
@@ -722,17 +749,31 @@ func toOperations(v interface{}) []Operation {
 	var ops []Operation
 	for _, item := range arr {
 		if m, ok := item.(map[string]interface{}); ok {
+			physical, _ := physicalDeleteArg(m) // handleTransaction validates before execution.
 			op := Operation{
-				Type:   toString(m["type"]),
-				Table:  toString(m["table"]),
-				Data:   toMap(m["data"]),
-				Where:  toMap(m["where"]),
-				Fields: toStringSlice(m["fields"]),
+				PhysicalDelete: physical,
+				Type:           toString(m["type"]),
+				Table:          toString(m["table"]),
+				Data:           toMap(m["data"]),
+				Where:          toMap(m["where"]),
+				Fields:         toStringSlice(m["fields"]),
 			}
 			ops = append(ops, op)
 		}
 	}
 	return ops
+}
+
+func physicalDeleteArg(args map[string]interface{}) (bool, error) {
+	value, exists := args["physical_delete"]
+	if !exists {
+		return false, nil
+	}
+	physical, ok := value.(bool)
+	if !ok {
+		return false, errors.NewError(errors.ErrInvalidInput, "physical_delete must be a boolean", nil)
+	}
+	return physical, nil
 }
 
 func toString(v interface{}) string {

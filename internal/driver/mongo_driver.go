@@ -247,8 +247,8 @@ func (d *MongoDriver) Insert(ctx context.Context, req *InsertRequest) (*Mutation
 
 	return &MutationResult{
 		AffectedRows: 1,
-		LastInsertID:  1,
-		Message:       "Insert successful",
+		LastInsertID: 1,
+		Message:      "Insert successful",
 	}, nil
 }
 
@@ -278,11 +278,19 @@ func (d *MongoDriver) Delete(ctx context.Context, req *DeleteRequest) (*Mutation
 	if err := sanitizer.ValidateTableName(req.Table); err != nil {
 		return nil, errors.NewError(errors.ErrInvalidInput, "invalid collection name", err)
 	}
+	if !req.PhysicalDelete && (req.DeleteField == nil || len(req.DeleteField.Fields) == 0) {
+		return nil, errors.NewError(errors.ErrInvalidInput, "no delete field detected", nil)
+	}
+	if req.PhysicalDelete && len(req.Where) == 0 {
+		return nil, errors.NewError(errors.ErrInvalidInput, "physical deletion requires non-empty where conditions", nil)
+	}
 	collection := d.database.Collection(req.Table)
 	filter := convertWhere(req.Where)
+	if req.PhysicalDelete && len(filter) == 0 {
+		return nil, errors.NewError(errors.ErrInvalidInput, "physical deletion requires non-empty filter conditions", nil)
+	}
 
-	// If DeleteField is set, perform logical delete
-	if req.DeleteField != nil && len(req.DeleteField.Fields) > 0 {
+	if !req.PhysicalDelete {
 		updates := bson.M{}
 		for _, field := range req.DeleteField.Fields {
 			updates[field.Name] = field.TrueValue
@@ -410,6 +418,9 @@ func (d *MongoDriver) BatchDelete(ctx context.Context, req *BatchDeleteRequest) 
 	if err := sanitizer.ValidateTableName(req.Table); err != nil {
 		return nil, errors.NewError(errors.ErrInvalidInput, "invalid collection name", err)
 	}
+	if !req.PhysicalDelete && (req.DeleteField == nil || len(req.DeleteField.Fields) == 0) {
+		return nil, errors.NewError(errors.ErrInvalidInput, "no delete field detected", nil)
+	}
 	collection := d.database.Collection(req.Table)
 
 	idField := req.IDField
@@ -424,7 +435,7 @@ func (d *MongoDriver) BatchDelete(ctx context.Context, req *BatchDeleteRequest) 
 		filter := bson.M{idField: id}
 
 		var err error
-		if req.DeleteField != nil && len(req.DeleteField.Fields) > 0 {
+		if !req.PhysicalDelete {
 			// Logical delete
 			updates := bson.M{}
 			for _, field := range req.DeleteField.Fields {

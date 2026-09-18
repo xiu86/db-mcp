@@ -91,6 +91,9 @@ databases:
 
 default: default
 
+# 默认禁止物理删除；开启后仍需请求显式设置 physical_delete: true
+allowPhysicalDelete: false
+
 pool:
   maxIdleConns: 10
   maxOpenConns: 100
@@ -327,15 +330,20 @@ claude mcp add --transport sse db-mcp http://localhost:8080/sse \
 
 ### `db_delete`
 
-执行逻辑删除。
+默认执行逻辑删除。可选布尔参数 `physical_delete` 默认 `false`。
 
 ```json
 {
   "table": "users",
   "instance": "default",
-  "where": {"id": 1}
+  "where": {"id": 1},
+  "physical_delete": false
 }
 ```
+
+只有服务端配置 `allowPhysicalDelete: true` 且请求 `physical_delete: true` 时，才会执行物理删除；配置未开启时返回错误，不会降级为逻辑删除。物理删除要求非空 `where`。
+
+MySQL 和 MongoDB 的逻辑删除在未识别到删除字段时均返回错误，**不会自动改为物理删除**。
 
 ### `db_batch_insert`
 
@@ -370,14 +378,15 @@ claude mcp add --transport sse db-mcp http://localhost:8080/sse \
 
 ### `db_batch_delete`
 
-按 ID 批量逻辑删除。
+按 ID 批量删除，默认逻辑删除。`physical_delete` 参数及配置开关与 `db_delete` 相同，每次最多 1000 个 ID。
 
 ```json
 {
   "table": "users",
   "instance": "default",
   "ids": ["1", "2", "3"],
-  "id_field": "id"
+  "id_field": "id",
+  "physical_delete": false
 }
 ```
 
@@ -409,6 +418,8 @@ claude mcp add --transport sse db-mcp http://localhost:8080/sse \
 ### `db_transaction`
 
 在单个事务中执行多个操作。
+
+事务中的 `type: "delete"` 操作也接受可选布尔参数 `physical_delete`，默认 `false`。物理删除同样要求配置 `allowPhysicalDelete: true` 和非空 `where`；禁用时整笔请求会在事务开始前被拒绝。当前事务实现基于 MySQL。
 
 ```json
 {

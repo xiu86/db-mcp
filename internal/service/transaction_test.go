@@ -424,7 +424,7 @@ func TestTransactionContext_Delete(t *testing.T) {
 		require.NoError(t, err)
 		defer txCtx.Rollback()
 
-		err = txCtx.Delete("tx_test_users", map[string]interface{}{"name": "DeleteTest"})
+		err = txCtx.Delete("tx_test_users", map[string]interface{}{"name": "DeleteTest"}, false)
 		require.NoError(t, err)
 
 		// Commit to verify
@@ -441,7 +441,7 @@ func TestTransactionContext_Delete(t *testing.T) {
 			tx: nil,
 		}
 
-		err := txCtx.Delete("tx_test_users", map[string]interface{}{"id": 1})
+		err := txCtx.Delete("tx_test_users", map[string]interface{}{"id": 1}, false)
 		assert.Error(t, err)
 	})
 }

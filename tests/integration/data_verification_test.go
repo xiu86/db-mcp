@@ -118,7 +118,7 @@ func TestL3_Insert_WritesCorrectData(t *testing.T) {
 	t.Logf("L3 Insert verification passed: inserted ID=%d", insertedID)
 
 	// Cleanup
-	l3CRUDService.Delete(ctx, "vc_account", map[string]interface{}{"id": insertedID})
+	l3CRUDService.Delete(ctx, "vc_account", map[string]interface{}{"id": insertedID}, false)
 }
 
 // TestL3_Update_UpdatesCorrectFields verifies that Update modifies only the specified fields
@@ -186,7 +186,7 @@ func TestL3_Update_UpdatesCorrectFields(t *testing.T) {
 	t.Logf("L3 Update verification passed: updated ID=%d", recordID)
 
 	// Cleanup
-	l3CRUDService.Delete(ctx, "vc_account", map[string]interface{}{"id": recordID})
+	l3CRUDService.Delete(ctx, "vc_account", map[string]interface{}{"id": recordID}, false)
 }
 
 // TestL3_Delete_SoftDeletesCorrectly verifies that Delete performs soft delete (sets is_del=1)
@@ -220,7 +220,7 @@ func TestL3_Delete_SoftDeletesCorrectly(t *testing.T) {
 	recordID := insertResult.AffectedRows
 
 	// When: soft delete the record
-	_, err = l3CRUDService.Delete(ctx, "vc_account", map[string]interface{}{"id": recordID})
+	_, err = l3CRUDService.Delete(ctx, "vc_account", map[string]interface{}{"id": recordID}, false)
 	if err != nil {
 		t.Fatalf("Delete failed: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestL3_BatchInsert_WritesAllRecords(t *testing.T) {
 	t.Logf("L3 BatchInsert verification passed: %d records inserted", result.SuccessCount)
 
 	// Cleanup: delete all inserted records
-	l3CRUDService.BatchDelete(ctx, "vc_account", []string{testPrefix + "_1", testPrefix + "_2", testPrefix + "_3"}, "out_account_id")
+	l3CRUDService.BatchDelete(ctx, "vc_account", []string{testPrefix + "_1", testPrefix + "_2", testPrefix + "_3"}, "out_account_id", false)
 }
 
 // TestL3_Query_WithConditions verifies query filtering works correctly
@@ -392,7 +392,7 @@ func TestL3_Query_WithConditions(t *testing.T) {
 	t.Logf("L3 Query verification passed: conditions work correctly")
 
 	// Cleanup
-	l3CRUDService.Delete(ctx, "vc_account", map[string]interface{}{"id": recordID})
+	l3CRUDService.Delete(ctx, "vc_account", map[string]interface{}{"id": recordID}, false)
 }
 
 // TestL3_BatchUpdate_UpdatesCorrectFields verifies batch update modifies correct fields
@@ -491,7 +491,7 @@ func TestL3_BatchUpdate_UpdatesCorrectFields(t *testing.T) {
 	t.Logf("L3 BatchUpdate verification passed")
 
 	// Cleanup
-	l3CRUDService.BatchDelete(ctx, "vc_account", []string{testPrefix + "_1", testPrefix + "_2"}, "out_account_id")
+	l3CRUDService.BatchDelete(ctx, "vc_account", []string{testPrefix + "_1", testPrefix + "_2"}, "out_account_id", false)
 }
 
 // TestL3_Schema_ReturnsDeleteFields verifies GetSchema returns correct delete field detection

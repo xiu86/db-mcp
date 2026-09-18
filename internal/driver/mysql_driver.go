@@ -218,10 +218,20 @@ func (d *MySQLDriver) Update(ctx context.Context, req *UpdateRequest) (*Mutation
 	}, nil
 }
 
-// Delete performs logical delete
+// Delete performs logical deletion unless physical deletion was explicitly requested.
 func (d *MySQLDriver) Delete(ctx context.Context, req *DeleteRequest) (*MutationResult, error) {
 	if err := sanitizer.ValidateTableName(req.Table); err != nil {
 		return nil, err
+	}
+	if req.PhysicalDelete {
+		if len(req.Where) == 0 {
+			return nil, errors.NewError(errors.ErrInvalidInput, "physical deletion requires non-empty where conditions", nil)
+		}
+		result := d.db.WithContext(ctx).Table(req.Table).Where(req.Where).Delete(&map[string]interface{}{})
+		if result.Error != nil {
+			return nil, errors.WrapGormError(result.Error)
+		}
+		return &MutationResult{AffectedRows: result.RowsAffected, Message: "Physical delete successful"}, nil
 	}
 	if req.DeleteField == nil || len(req.DeleteField.Fields) == 0 {
 		return nil, errors.NewError(errors.ErrInvalidInput, "no delete field detected", nil)
@@ -318,12 +328,12 @@ func (d *MySQLDriver) BatchUpdate(ctx context.Context, req *BatchUpdateRequest) 
 	}, nil
 }
 
-// BatchDelete performs batch logical delete
+// BatchDelete deletes each ID using the explicitly selected deletion mode.
 func (d *MySQLDriver) BatchDelete(ctx context.Context, req *BatchDeleteRequest) (*BatchResult, error) {
 	if err := sanitizer.ValidateTableName(req.Table); err != nil {
 		return nil, err
 	}
-	if req.DeleteField == nil || len(req.DeleteField.Fields) == 0 {
+	if !req.PhysicalDelete && (req.DeleteField == nil || len(req.DeleteField.Fields) == 0) {
 		return nil, errors.NewError(errors.ErrInvalidInput, "no delete field detected", nil)
 	}
 
@@ -342,16 +352,24 @@ func (d *MySQLDriver) BatchDelete(ctx context.Context, req *BatchDeleteRequest) 
 	safeIDField := sanitizer.QuoteIdentifier(idField)
 
 	updates := make(map[string]interface{})
-	for _, field := range req.DeleteField.Fields {
-		if field.TrueValue == detector.CurrentTimestampMarker {
-			updates[field.Name] = detector.GetCurrentTimestamp()
-		} else {
-			updates[field.Name] = field.TrueValue
+	if !req.PhysicalDelete {
+		for _, field := range req.DeleteField.Fields {
+			if field.TrueValue == detector.CurrentTimestampMarker {
+				updates[field.Name] = detector.GetCurrentTimestamp()
+			} else {
+				updates[field.Name] = field.TrueValue
+			}
 		}
 	}
 
 	for i, id := range req.IDs {
-		result := d.db.Table(req.Table).Where(safeIDField+" = ?", id).Updates(updates)
+		query := d.db.WithContext(ctx).Table(req.Table).Where(safeIDField+" = ?", id)
+		var result *gorm.DB
+		if req.PhysicalDelete {
+			result = query.Delete(&map[string]interface{}{})
+		} else {
+			result = query.Updates(updates)
+		}
 		if result.Error != nil {
 			failedCount++
 			batchErrors = append(batchErrors, BatchError{Index: i, Message: result.Error.Error()})
@@ -390,7 +408,7 @@ func (d *MySQLDriver) JoinQuery(ctx context.Context, req *JoinRequest) (*QueryRe
 
 	table0 := req.Tables[0]
 	query := d.db.Table(
-		sanitizer.QuoteIdentifier(table0.Name)+" AS "+sanitizer.QuoteIdentifier(table0.Alias),
+		sanitizer.QuoteIdentifier(table0.Name) + " AS " + sanitizer.QuoteIdentifier(table0.Alias),
 	)
 
 	for i, join := range req.Joins {
@@ -473,13 +491,13 @@ func (d *MySQLDriver) GetTableSchema(tableName string) (*TableSchema, error) {
 	}
 
 	var results []struct {
-		Field          string `gorm:"column:COLUMN_NAME"`
-		Type           string `gorm:"column:DATA_TYPE"`
-		Null           string `gorm:"column:IS_NULLABLE"`
-		Key            string `gorm:"column:COLUMN_KEY"`
-		Default        *string `gorm:"column:COLUMN_DEFAULT"`
-		Extra          string `gorm:"column:EXTRA"`
-		Comment        string `gorm:"column:COLUMN_COMMENT"`
+		Field   string  `gorm:"column:COLUMN_NAME"`
+		Type    string  `gorm:"column:DATA_TYPE"`
+		Null    string  `gorm:"column:IS_NULLABLE"`
+		Key     string  `gorm:"column:COLUMN_KEY"`
+		Default *string `gorm:"column:COLUMN_DEFAULT"`
+		Extra   string  `gorm:"column:EXTRA"`
+		Comment string  `gorm:"column:COLUMN_COMMENT"`
 	}
 
 	err := d.db.Table("information_schema.COLUMNS").

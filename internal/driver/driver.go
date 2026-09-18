@@ -43,7 +43,7 @@ type DatabaseDriver interface {
 type DriverType string
 
 const (
-	DriverMySQL  DriverType = "mysql"
+	DriverMySQL   DriverType = "mysql"
 	DriverMongoDB DriverType = "mongodb"
 )
 
@@ -78,9 +78,10 @@ type UpdateRequest struct {
 
 // DeleteRequest represents a delete request
 type DeleteRequest struct {
-	Table       string
-	Where       map[string]interface{}
-	DeleteField *detector.DeleteFieldInfo
+	PhysicalDelete bool
+	Table          string
+	Where          map[string]interface{}
+	DeleteField    *detector.DeleteFieldInfo
 }
 
 // BatchInsertRequest represents a batch insert request
@@ -98,10 +99,11 @@ type BatchUpdateRequest struct {
 
 // BatchDeleteRequest represents a batch delete request
 type BatchDeleteRequest struct {
-	Table       string
-	IDs         []string
-	IDField     string
-	DeleteField *detector.DeleteFieldInfo
+	PhysicalDelete bool
+	Table          string
+	IDs            []string
+	IDField        string
+	DeleteField    *detector.DeleteFieldInfo
 }
 
 // JoinRequest represents a join query request

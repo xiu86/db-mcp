@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"db-mcp/internal/config"
@@ -25,22 +26,13 @@ func NewHTTPTransport(mcpServer *server.MCPServer, cfg *config.MCPConfig, auth *
 
 	switch cfg.Transport {
 	case "sse":
-		// SSE transport with optional auth
 		sseServer := server.NewSSEServer(mcpServer)
 		handler = http.Handler(sseServer)
-	default:
-		// Streamable HTTP (default for "http" or "streamable-http")
-		opts := []server.StreamableHTTPOption{}
-		if cfg.EndpointPath != "" {
-			opts = append(opts, server.WithEndpointPath(cfg.EndpointPath))
+		if auth != nil && len(cfg.Tokens) > 0 {
+			handler = auth.Middleware(handler)
 		}
-		httpServer := server.NewStreamableHTTPServer(mcpServer, opts...)
-		handler = httpServer
-	}
-
-	// Wrap with auth middleware if tokens are configured
-	if auth != nil && len(cfg.Tokens) > 0 {
-		handler = auth.Middleware(handler)
+	default:
+		handler = newStreamableHTTPHandler(mcpServer, cfg, auth)
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
@@ -56,6 +48,43 @@ func NewHTTPTransport(mcpServer *server.MCPServer, cfg *config.MCPConfig, auth *
 		httpServer: httpSrv,
 		logger:     nil,
 	}
+}
+
+// newStreamableHTTPHandler mounts MCP on exactly one endpoint and keeps discovery paths outside auth.
+func newStreamableHTTPHandler(mcpServer *server.MCPServer, cfg *config.MCPConfig, auth *middleware.TokenAuth) http.Handler {
+	endpointPath := normalizeEndpointPath(cfg.EndpointPath)
+	streamableServer := server.NewStreamableHTTPServer(
+		mcpServer,
+		// db-mcp does not initiate server-to-client requests, so the optional GET stream is unnecessary.
+		server.WithDisableStreaming(true),
+	)
+
+	var mcpHandler http.Handler = streamableServer
+	if auth != nil && len(cfg.Tokens) > 0 {
+		mcpHandler = auth.Middleware(mcpHandler)
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle(endpointPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != endpointPath {
+			http.NotFound(w, r)
+			return
+		}
+		mcpHandler.ServeHTTP(w, r)
+	}))
+	return mux
+}
+
+// normalizeEndpointPath applies the documented /mcp default and removes surrounding slashes.
+func normalizeEndpointPath(endpointPath string) string {
+	trimmedPath := strings.Trim(endpointPath, "/")
+	if trimmedPath == "" {
+		if endpointPath == "/" {
+			return "/"
+		}
+		return "/mcp"
+	}
+	return "/" + trimmedPath
 }
 
 // Start begins listening for HTTP requests

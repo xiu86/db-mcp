@@ -183,7 +183,7 @@ func TestCRUDService_Delete(t *testing.T) {
 		// Delete is called
 		mockRepo.EXPECT().Delete(ctx, gomock.Any()).Return(deleteResult, nil)
 
-		result, err := service.Delete(ctx, "users", where)
+		result, err := service.Delete(ctx, "users", where, false)
 
 		assert.NoError(t, err)
 		assert.Equal(t, deleteResult, result)
@@ -211,7 +211,7 @@ func TestCRUDService_Delete(t *testing.T) {
 		// Delete is called
 		mockRepo.EXPECT().Delete(ctx, gomock.Any()).Return(nil, errors.New("delete error"))
 
-		result, err := service.Delete(ctx, "users", where)
+		result, err := service.Delete(ctx, "users", where, false)
 
 		assert.Error(t, err)
 		assert.Nil(t, result)
@@ -320,7 +320,7 @@ func TestCRUDService_BatchDelete(t *testing.T) {
 
 		mockRepo.EXPECT().BatchDelete(ctx, gomock.Any()).Return(expectedResult, nil)
 
-		result, err := service.BatchDelete(ctx, "users", ids, "id")
+		result, err := service.BatchDelete(ctx, "users", ids, "id", false)
 
 		assert.NoError(t, err)
 		assert.Equal(t, expectedResult.SuccessCount, result.SuccessCount)

@@ -20,6 +20,7 @@ type TransactionService struct {
 }
 
 type TransactionContext struct {
+	config   *config.Config
 	db       *gorm.DB
 	tx       *gorm.DB
 	audit    *AuditService
@@ -44,6 +45,7 @@ func (s *TransactionService) Begin(ctx context.Context) (*TransactionContext, er
 	}
 
 	return &TransactionContext{
+		config:   s.config,
 		db:       s.db,
 		tx:       tx,
 		audit:    s.audit,
@@ -138,12 +140,24 @@ func (tc *TransactionContext) Update(table string, data, where map[string]interf
 	return nil
 }
 
-func (tc *TransactionContext) Delete(table string, where map[string]interface{}) error {
+func (tc *TransactionContext) Delete(table string, where map[string]interface{}, physical bool) error {
+	if err := ValidateDeleteMode(tc.config, physical); err != nil {
+		return err
+	}
 	if tc.tx == nil {
 		return errors.NewError(errors.ErrInvalidInput, "transaction not started", nil)
 	}
 	if err := sanitizer.ValidateTableName(table); err != nil {
 		return err
+	}
+	if physical {
+		if len(where) == 0 {
+			return errors.NewError(errors.ErrInvalidInput, "physical deletion requires non-empty where conditions", nil)
+		}
+		if err := tc.tx.Table(table).Where(where).Delete(&map[string]interface{}{}).Error; err != nil {
+			return errors.WrapGormError(err)
+		}
+		return nil
 	}
 
 	// Detect and use logical delete fields

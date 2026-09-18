@@ -5,6 +5,7 @@ import (
 	"db-mcp/internal/config"
 	"db-mcp/internal/detector"
 	"db-mcp/internal/driver"
+	"db-mcp/internal/errors"
 	"db-mcp/internal/repository"
 	"db-mcp/pkg/logger"
 )
@@ -92,12 +93,28 @@ func (s *CRUDService) Update(ctx context.Context, table string, data, where map[
 	return result, nil
 }
 
-func (s *CRUDService) Delete(ctx context.Context, table string, where map[string]interface{}) (*driver.MutationResult, error) {
-	auditCtx := s.audit.Start("delete", table, "")
+func (s *CRUDService) Delete(ctx context.Context, table string, where map[string]interface{}, physical bool) (*driver.MutationResult, error) {
+	operation := "delete"
+	if physical {
+		operation = "physical_delete"
+	}
+	auditCtx := s.audit.Start(operation, table, "")
+	if err := ValidateDeleteMode(s.config, physical); err != nil {
+		s.audit.Fail(auditCtx, err.Error())
+		return nil, err
+	}
+	if physical && len(where) == 0 {
+		err := errors.NewError(errors.ErrInvalidInput, "physical deletion requires non-empty where conditions", nil)
+		s.audit.Fail(auditCtx, err.Error())
+		return nil, err
+	}
 
 	// Detect delete fields
-	columns := s.getTableColumns(table)
-	deleteField := s.detector.Detect(table, columns)
+	var deleteField *detector.DeleteFieldInfo
+	if !physical {
+		columns := s.getTableColumns(table)
+		deleteField = s.detector.Detect(table, columns)
+	}
 
 	// Get before data for audit
 	beforeResult, _ := s.repo.Query(ctx, &driver.QueryRequest{
@@ -108,16 +125,21 @@ func (s *CRUDService) Delete(ctx context.Context, table string, where map[string
 	CaptureSQLForContext(auditCtx)
 
 	result, err := s.repo.Delete(ctx, &driver.DeleteRequest{
-		Table:       table,
-		Where:       where,
-		DeleteField: deleteField,
+		PhysicalDelete: physical,
+		Table:          table,
+		Where:          where,
+		DeleteField:    deleteField,
 	})
 	CaptureSQLForContext(auditCtx)
 	if err != nil {
 		s.audit.Fail(auditCtx, err.Error())
 		return nil, err
 	}
-	s.audit.Success(auditCtx, beforeResult.Rows, nil, result.AffectedRows)
+	var beforeRows []map[string]interface{}
+	if beforeResult != nil {
+		beforeRows = beforeResult.Rows
+	}
+	s.audit.Success(auditCtx, beforeRows, nil, result.AffectedRows)
 	return result, nil
 }
 
@@ -152,17 +174,29 @@ func (s *CRUDService) BatchUpdate(ctx context.Context, table string, data []map[
 	return result, nil
 }
 
-func (s *CRUDService) BatchDelete(ctx context.Context, table string, ids []string, idField string) (*driver.BatchResult, error) {
-	auditCtx := s.audit.Start("batch_delete", table, "")
+func (s *CRUDService) BatchDelete(ctx context.Context, table string, ids []string, idField string, physical bool) (*driver.BatchResult, error) {
+	operation := "batch_delete"
+	if physical {
+		operation = "batch_physical_delete"
+	}
+	auditCtx := s.audit.Start(operation, table, "")
+	if err := ValidateDeleteMode(s.config, physical); err != nil {
+		s.audit.Fail(auditCtx, err.Error())
+		return nil, err
+	}
 
-	columns := s.getTableColumns(table)
-	deleteField := s.detector.Detect(table, columns)
+	var deleteField *detector.DeleteFieldInfo
+	if !physical {
+		columns := s.getTableColumns(table)
+		deleteField = s.detector.Detect(table, columns)
+	}
 
 	result, err := s.repo.BatchDelete(ctx, &driver.BatchDeleteRequest{
-		Table:       table,
-		IDs:         ids,
-		IDField:     idField,
-		DeleteField: deleteField,
+		PhysicalDelete: physical,
+		Table:          table,
+		IDs:            ids,
+		IDField:        idField,
+		DeleteField:    deleteField,
 	})
 	CaptureSQLForContext(auditCtx)
 	if err != nil {

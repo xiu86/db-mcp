@@ -166,7 +166,7 @@ func TestService_Delete(t *testing.T) {
 		t.Skipf("Skipping delete test: insert failed: %v", err)
 	}
 
-	result, err := testCRUDService.Delete(ctx, "vc_account", map[string]interface{}{"id": insertResult.AffectedRows})
+	result, err := testCRUDService.Delete(ctx, "vc_account", map[string]interface{}{"id": insertResult.AffectedRows}, false)
 
 	if err != nil {
 		t.Logf("Delete error: %v", err)
@@ -353,7 +353,7 @@ func TestService_BatchDelete(t *testing.T) {
 		ids[i] = fmt.Sprintf("%v", row["id"])
 	}
 
-	result, err := testCRUDService.BatchDelete(ctx, "vc_account", ids, "id")
+	result, err := testCRUDService.BatchDelete(ctx, "vc_account", ids, "id", false)
 
 	if err != nil {
 		t.Logf("BatchDelete error: %v", err)

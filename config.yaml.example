@@ -28,6 +28,10 @@ databases:
 # Default instance to use
 default: default
 
+# Physical deletion requires BOTH this switch and physical_delete: true in the request.
+# Omitted or false: physical deletion is forbidden; deletion defaults to logical.
+allowPhysicalDelete: false
+
 # ============================================
 # Connection Pool
 # ============================================

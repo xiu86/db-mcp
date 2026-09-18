@@ -11,6 +11,7 @@ import (
 )
 
 type Config struct {
+    AllowPhysicalDelete bool `yaml:"allowPhysicalDelete" json:"allowPhysicalDelete"`
     Databases []InstanceConfig       `yaml:"databases" json:"databases"`
     Default   string                 `yaml:"default" json:"default"`       // Default instance name
     MCP       MCPConfig              `yaml:"mcp" json:"mcp"`
